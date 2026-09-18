@@ -91,6 +91,19 @@ const getPoolChange = (
   const BASE = 10_000n;
   const offFee = BASE - lpFeeRate;
 
+  // A pool can have zero (or, for a corrupt datum, negative) real reserve on
+  // the buy side — e.g. an ADA pool whose entire reserve is tied up in the
+  // reserved min-ADA/fee amount excluded from activeReserveX. There is
+  // nothing to cap the trade down to: any swap in this direction can only
+  // produce a degenerate 0-for-0 result the validator itself refuses, so
+  // reject it here instead of building a transaction that can only fail
+  // on-chain. This is distinct from a merely tiny amountIn rounding its own
+  // (uncapped) output down to zero against an otherwise healthy reserve,
+  // which stays a valid, if uneconomical, trade.
+  if (tokenOutReal <= 0n) {
+    throw new Error("pool out exceeded");
+  }
+
   // main math
   const denominator = tokenInVirtual * BASE + amountIn * offFee;
   const virtualProduct = tokenInVirtual * tokenOutVirtual;

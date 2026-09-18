@@ -20,6 +20,7 @@ import {
   PoolDatum,
   parseDatum,
   parseProtocolConfigDatum,
+  tokenIdToTuple,
   transformPoolDatum,
 } from "./datum.js";
 import {
@@ -227,6 +228,7 @@ class DanogoClmm {
     // Prepare pool data and calculate swap results
     const poolsData = [];
     const stakingUtxos = [];
+    const rewardAmounts: bigint[] = [];
 
     for (let i = 0; i < request.pools.length; i++) {
       const pool = request.pools[i];
@@ -253,6 +255,18 @@ class DanogoClmm {
       }
       stakingUtxos.push(stakingRefUtxo);
 
+      // Resolve the staking reward up front so it can be applied consistently
+      // both to the swap calculation and to the pool output assets below.
+      let rewardAmount = 0n;
+      if (
+        tokenA.unit === ADA_UNIT &&
+        stakingRefUtxo &&
+        currentEpoch > poolDatum.lastWithdrawEpoch
+      ) {
+        rewardAmount = await this.getRewardAmount(client, networkId, stakingRefUtxo);
+      }
+      rewardAmounts.push(rewardAmount);
+
       poolsData.push({
         tokenAAmount: getTokenAmount(tokenA),
         tokenBAmount: getTokenAmount(tokenB),
@@ -260,6 +274,7 @@ class DanogoClmm {
         utxo: poolUtxo,
         tokenA,
         tokenB,
+        rewardAmount,
       });
     }
 
@@ -272,8 +287,8 @@ class DanogoClmm {
     );
 
     // Check output meets minimum for each pool
-    swapResults.forEach((result, index) => {
-      const minOut = request.pools[index].minOutChangeAmount ?? 0n;
+    swapResults.forEach((result) => {
+      const minOut = request.pools[result.poolIndex].minOutChangeAmount ?? 0n;
       if (result.outputAmount < minOut) {
         throw new Error(
           `Expected swap output at least ${minOut} but got ${result.outputAmount}`,
@@ -316,6 +331,11 @@ class DanogoClmm {
       if (!swapResult) continue;
 
       const { deltaAmount, platformFee, outputAmount } = swapResult;
+      const rewardAmount = rewardAmounts[i];
+      const rewardApplies =
+        pool.tokenA.unit === ADA_UNIT &&
+        currentEpoch > pool.datum.lastWithdrawEpoch &&
+        !!stakingUtxos[i];
 
       // Transform pool datum
       const transformedDatum = transformPoolDatum({
@@ -339,7 +359,10 @@ class DanogoClmm {
         outputAmount,
         protocolConfigDatum.swapFee,
       );
-      const poolOutAssets = merge(pool.utxo.assets, deltaAssets);
+      let poolOutAssets = merge(pool.utxo.assets, deltaAssets);
+      if (rewardApplies && rewardAmount > 0n) {
+        poolOutAssets = merge(poolOutAssets, fromLovelace(rewardAmount));
+      }
 
       // Add pool output
       tx = tx.payToAddress({
@@ -360,12 +383,7 @@ class DanogoClmm {
       });
 
       // Handle staking rewards if applicable
-      if (
-        pool.tokenA.unit === ADA_UNIT &&
-        currentEpoch > pool.datum.lastWithdrawEpoch &&
-        stakingUtxos[i]
-      ) {
-        const rewardAmount = await this.getRewardAmount(client, networkId, stakingUtxos[i]);
+      if (rewardApplies) {
         tx = tx.withdraw({
           stakeCredential: fromScript(stakingUtxos[i]!.scriptRef!),
           amount: rewardAmount,
@@ -431,7 +449,7 @@ class DanogoClmm {
       if (policyAssets && utxo.datum) {
         for (const [assetName, quantity] of Object.entries(policyAssets)) {
           if (quantity === 1n) {
-            const poolNft = poolScriptHash + assetName;
+            const poolNft = scriptHash + assetName;
             const outRef = `${tx.id}#${index}`;
             const coin = val.ada.lovelace;
             const multiAssets: MultiAsset[] = buildMultiAssetsFromAssets(val);
@@ -442,8 +460,7 @@ class DanogoClmm {
 
             const getTokenReserve = (tokenId: string) => {
               if (tokenId === ADA_UNIT) return coin;
-              const policyId = tokenId.slice(0, 56);
-              const assetName = tokenId.slice(56);
+              const [policyId, assetName] = tokenIdToTuple(tokenId);
               const policyGroup = multiAssets.find(
                 (ma) => ma.policyId === policyId,
               );
@@ -481,24 +498,6 @@ class DanogoClmm {
       }
     });
     return concentratedPools;
-  }
-
-  /**
-   * Helper function to get the balance of a specific token from user UTXOs
-   */
-  private async getUserTokenBalance(
-    client: SigningClient,
-    token: { unit: string; policyId?: any; assetName?: any },
-  ): Promise<bigint> {
-    const userUtxos = await client.getWalletUtxos();
-    return userUtxos.reduce(
-      (acc, utxo) =>
-        acc +
-        (token.unit === ADA_UNIT
-          ? utxo.assets.lovelace
-          : quantityOf(utxo.assets, token.policyId, token.assetName) || 0n),
-      0n,
-    );
   }
 
   /**

@@ -4,10 +4,9 @@ import {
   RewardAccount,
   RewardAddress,
   SigningClient,
-  TransactionOutput,
   UTxO,
-  Value,
 } from "@evolution-sdk/evolution";
+import * as TxOut from "@evolution-sdk/evolution/TxOut";
 import { SigningTransactionBuilder } from "@evolution-sdk/evolution/sdk/builders/TransactionBuilder";
 import { InlineDatum } from "@evolution-sdk/evolution/InlineDatum";
 import * as ScriptHash from "@evolution-sdk/evolution/ScriptHash";
@@ -51,24 +50,6 @@ import {
 } from "./utils.js";
 import { ADA_UNIT, getNetworkConfig } from "./constants.js";
 import { toHex } from "@evolution-sdk/evolution/Bytes32";
-
-/** Map keys are compared by reference, so asset lookups have to go through the hex form. */
-const holdsNft = (
-  value: Value.Value,
-  policyIdHex: string,
-  assetName: AssetName.AssetName,
-): boolean => {
-  if (!Value.hasAssets(value)) return false;
-
-  const wanted = AssetName.toHex(assetName);
-  for (const [policyId, assets] of value.assets.map.entries()) {
-    if (PolicyId.toHex(policyId) !== policyIdHex) continue;
-    for (const [name, quantity] of assets.entries()) {
-      if (AssetName.toHex(name) === wanted) return quantity === 1n;
-    }
-  }
-  return false;
-};
 
 class DanogoClmm {
   constructor() { }
@@ -559,7 +540,10 @@ class DanogoClmm {
 
     const concentratedPools: ConcentratedPool[] = [];
 
-    tx.outputs.forEach((utxo, index) => {
+    // Ogmios omits outputs entirely for a transaction that has none.
+    const outputs = tx.outputs ?? [];
+
+    outputs.forEach((utxo, index) => {
       const val = utxo.value;
       const policyAssets = val[scriptHash];
 
@@ -652,17 +636,22 @@ class DanogoClmm {
    * redeemer says, rather than trusting the ordering to hold.
    */
   private assertPoolOutputsAt(
-    outputs: readonly TransactionOutput.TransactionOutput[],
+    outputs: readonly TxOut.TransactionOutput[],
     pools: { validityNft: AssetName.AssetName; outRef: string }[],
     outputIndices: number[],
     scriptHash: string,
   ): void {
+    const policyId = PolicyId.fromHex(scriptHash);
+
     pools.forEach((pool, index) => {
       const outputIndex = outputIndices[index];
       if (outputIndex < 0) return;
 
       const output = outputs[outputIndex];
-      if (!output || !holdsNft(output.amount, scriptHash, pool.validityNft)) {
+      const held = output
+        ? quantityOf(output.assets, policyId, pool.validityNft)
+        : 0n;
+      if (held !== 1n) {
         throw new Error(
           `Pool ${pool.outRef} is declared at output ${outputIndex} of the built transaction, but that output does not hold its validity NFT.`,
         );

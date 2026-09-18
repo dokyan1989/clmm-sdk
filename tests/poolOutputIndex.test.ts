@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  AssetName,
-  MultiAsset,
-  TransactionOutput,
-  Value,
-} from "@evolution-sdk/evolution";
+import { Address, AssetName, Assets, ScriptHash } from "@evolution-sdk/evolution";
+import * as TxOut from "@evolution-sdk/evolution/TxOut";
 import DanogoClmm from "../src/sdk.js";
 import { POOL_SCRIPT_HASH_MAINNET } from "../src/constants.js";
 import { getPolicyIdAssetNameFromUnit } from "../src/multiAssets.js";
@@ -17,36 +13,40 @@ const NFT_B = "11223344";
 const nftName = (name: string): AssetName.AssetName =>
   getPolicyIdAssetNameFromUnit(`${POOL_SCRIPT_HASH_MAINNET}.${name}`).assetName!;
 
-const outputHolding = (
-  ...nfts: string[]
-): TransactionOutput.TransactionOutput => {
+/** Built the way the transaction builder hands outputs back. */
+const outputWith = (assets: Assets.Assets): TxOut.TransactionOutput =>
+  new TxOut.TransactionOutput({
+    address: new Address.Address({
+      networkId: 1,
+      paymentCredential: ScriptHash.fromHex(POOL_SCRIPT_HASH_MAINNET),
+    }),
+    assets,
+  });
+
+const outputHolding = (nft: string): TxOut.TransactionOutput => {
   const { policyId } = getPolicyIdAssetNameFromUnit(
     `${POOL_SCRIPT_HASH_MAINNET}.${NFT_A}`,
   );
-  const assets = nfts.reduce(
-    (acc, name) => MultiAsset.addAsset(acc, policyId!, nftName(name), 1n),
-    MultiAsset.empty(),
+  return outputWith(
+    Assets.fromAsset(policyId!, nftName(nft), 1n, 8_000_000n),
   );
-  return {
-    amount: Value.withAssets(8_000_000n, assets),
-  } as TransactionOutput.TransactionOutput;
 };
 
-const walletOutput = (): TransactionOutput.TransactionOutput =>
-  ({ amount: Value.onlyCoin(5_000_000n) }) as TransactionOutput.TransactionOutput;
+const walletOutput = (): TxOut.TransactionOutput =>
+  outputWith(Assets.fromLovelace(5_000_000n));
 
 const poolA = { validityNft: nftName(NFT_A), outRef: POOL_A_OUT_REF };
 const poolB = { validityNft: nftName(NFT_B), outRef: POOL_B_OUT_REF };
 
 const verify = (
-  outputs: TransactionOutput.TransactionOutput[],
+  outputs: TxOut.TransactionOutput[],
   pools: { validityNft: AssetName.AssetName; outRef: string }[],
   indices: number[],
 ) =>
   (
     new DanogoClmm() as unknown as {
       assertPoolOutputsAt: (
-        outputs: TransactionOutput.TransactionOutput[],
+        outputs: TxOut.TransactionOutput[],
         pools: { validityNft: AssetName.AssetName; outRef: string }[],
         indices: number[],
         scriptHash: string,

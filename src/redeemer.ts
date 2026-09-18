@@ -43,14 +43,11 @@ export const swapTokensRedeemer = (
   try {
     // Supports multi-pool vector: (pool_in, pool_out, amount)+
     const buildRedeemerData = (
-      indexedTargetPoolIndex: bigint | null,
+      inIndex: bigint,
       indexedInputs: ReadonlyArray<IndexedInput>,
     ): Data.Data => {
       const SWAP_ACTION = 3n;
-      const firstBytes = bigintToBytesPadded(
-        targetPoolUTxO ? indexedTargetPoolIndex : protocolConfigIdx,
-        1,
-      );
+      const firstBytes = bigintToBytesPadded(inIndex, 1);
       const actionBytes = bigintToBytesPadded(SWAP_ACTION, 1);
 
       const poolEntries = poolInUTxOs
@@ -121,9 +118,11 @@ export const swapTokensRedeemer = (
             "swapTokensRedeemer batch all called with empty indexedInputs",
           );
         }
-        let indexedTargetPool = null;
+        // A spend redeemer points the validator at its own pool input; the one
+        // withdrawal that invokes the validator points at the protocol config.
+        let inIndex = protocolConfigIdx;
         if (targetPoolUTxO) {
-          indexedTargetPool = indexedInputs.find(
+          const indexedTargetPool = indexedInputs.find(
             (poolUtxo) =>
               poolUtxo.utxo.transactionId === targetPoolUTxO.transactionId &&
               poolUtxo.utxo.index === targetPoolUTxO.index,
@@ -131,8 +130,9 @@ export const swapTokensRedeemer = (
           if (!indexedTargetPool) {
             throw new Error("Target pool UTxO is not found in poolInUTxOs");
           }
+          inIndex = BigInt(indexedTargetPool.index);
         }
-        return buildRedeemerData(indexedTargetPool?.index, indexedInputs);
+        return buildRedeemerData(inIndex, indexedInputs);
       },
       inputs: poolInUTxOs,
     };

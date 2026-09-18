@@ -28,17 +28,19 @@
   },
   "scripts": {
     "build": "tsup src/sdk.ts --format cjs,esm --dts --minify --clean --no-splitting",
-    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "npm run typecheck && vitest run",
     "prepublishOnly": "npm run build"
   },
   "publishConfig": {
     "access": "public"
   },
   "dependencies": {
-    "@cardano-ogmios/schema": "6.14.0",
+    "@cardano-ogmios/schema": "^7.0.0",
     "@evolution-sdk/evolution": "0.3.32"
   },
   "devDependencies": {
+    "@types/node": "^22.20.3",
     "tsup": "^8.0.0",
     "typescript": "^5.9.2",
     "vitest": "^5.0.1"

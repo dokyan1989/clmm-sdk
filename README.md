@@ -13,7 +13,7 @@ npm install danogo-clmm
 This SDK requires:
 - Node.js 18+
 - `@evolution-sdk/evolution` version `^0.5.13` for wallet management and transaction building
-- A Kupmios provider for blockchain data and transaction submission
+- A supported evolution-sdk provider (Kupmios, Koios, Blockfrost, or Maestro) for blockchain data and transaction submission
 - Support network: Preprod & Mainnet
 
 ### ⚠️ Ogmios version requirement (Kupmios provider only)
@@ -113,7 +113,9 @@ const txHash = await danogoClmm.submitSwap(evolutionClient, {
 
 > `protocolConfigOutRef` is optional and defaults to the SDK's internal constants. In rare cases where the protocol configuration has updated but the SDK has not yet been updated, you can manually provide the latest `protocolConfigOutRef` in your request. Refer to `src/constants.ts` for the constants.
 
-### 4. Get Pool Info from Ogmios Transaction
+> `currentEpoch` is also optional on both `calculateSwapOut` and `submitSwap` requests. It defaults to the epoch derived from this machine's clock, which is wrong right around an epoch boundary if your clock is skewed — pass the epoch read from the chain if you have it (this is what decides whether a pool's `stakingOutRef` is required, per above).
+
+### 3. Get Pool Info from Ogmios Transaction
 
 Extract pool data directly from an Ogmios transaction object. This example drives
 the chain-synchronization client yourself, so install `@cardano-ogmios/client`

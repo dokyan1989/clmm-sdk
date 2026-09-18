@@ -23,11 +23,11 @@ This SDK requires:
 Initialize the SDK and the Evolution client.
 ```typescript
 import DanogoClmm from "danogo-clmm";
-import { client, preprod } from "@evolution-sdk/evolution";
+import { Client, preprod } from "@evolution-sdk/evolution";
 
 const danogoClmm = new DanogoClmm();
 
-const evolutionClient = client(preprod)
+const evolutionClient = Client.make(preprod)
   .withKupmios({
     kupoUrl: "your_kupo_url",
     ogmiosUrl: "your_ogmios_url",

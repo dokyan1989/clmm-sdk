@@ -1,15 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   Address,
   Assets,
   Credential,
   Data,
   ScriptHash,
-  SigningClient,
   TransactionHash,
   TransactionInput,
   UTxO,
 } from "@evolution-sdk/evolution";
+import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
 import { InlineDatum } from "@evolution-sdk/evolution/InlineDatum";
 import * as PlutusV3 from "@evolution-sdk/evolution/PlutusV3";
 import { fromScript, toHex as toScriptHashHex } from "@evolution-sdk/evolution/ScriptHash";
@@ -20,6 +20,25 @@ import {
   POOL_SCRIPT_OUT_REF_MAINNET,
   PROTOCOL_CONFIG_OUT_REF_MAINNET,
 } from "../src/constants.js";
+
+// This SDK now verifies the pool-script UTxO's real hash against
+// POOL_SCRIPT_HASH_MAINNET, which no fixture bytes can be made to hash to.
+// POOL_SCRIPT (bytes [1,2,3,4] below) stands in for that one fixed policy;
+// SEPARATE_STAKE_SCRIPT ([9,9,9,9]) still hashes for real.
+vi.mock("@evolution-sdk/evolution/ScriptHash", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@evolution-sdk/evolution/ScriptHash")>();
+  return {
+    ...actual,
+    fromScript: (script: unknown) => {
+      const bytes = (script as { bytes?: Uint8Array }).bytes;
+      if (bytes && bytes.length === 4 && bytes[0] === 1 && bytes[1] === 2) {
+        return actual.fromHex(POOL_SCRIPT_HASH_MAINNET);
+      }
+      return actual.fromScript(script as never);
+    },
+  };
+});
 import { transformPoolDatum, type PoolDatum } from "../src/datum.js";
 import { getEpoch } from "../src/utils.js";
 import { getPolicyIdAssetNameFromUnit } from "../src/multiAssets.js";

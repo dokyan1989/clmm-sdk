@@ -4,10 +4,10 @@ import {
   Assets,
   KeyHash,
   ScriptHash,
-  SigningClient,
   TransactionHash,
   UTxO,
 } from "@evolution-sdk/evolution";
+import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
 import DanogoClmm from "../src/sdk.js";
 import { POOL_SCRIPT_HASH_MAINNET } from "../src/constants.js";
 import { getPolicyIdAssetNameFromUnit } from "../src/multiAssets.js";

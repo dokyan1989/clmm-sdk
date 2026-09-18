@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Data } from "@evolution-sdk/evolution";
-import { InlineDatum } from "@evolution-sdk/evolution/InlineDatum";
 import { parseProtocolConfigDatum } from "../src/datum.js";
 
-const datumOf = (...fields: Data.Data[]) =>
-  new InlineDatum({ data: Data.constr(0n, fields) });
+const datumOf = (...fields: Data.Data[]) => Data.constr(0n, fields);
 
 describe("protocol config datum", () => {
   it("parses a well-formed config", () => {

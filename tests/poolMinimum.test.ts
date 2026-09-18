@@ -1,15 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   Address,
   Assets,
   Data,
   ScriptHash,
-  SigningClient,
   TransactionHash,
   TransactionInput,
   UTxO,
 } from "@evolution-sdk/evolution";
+import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
 import { InlineDatum } from "@evolution-sdk/evolution/InlineDatum";
+import * as PlutusV3 from "@evolution-sdk/evolution/PlutusV3";
 import DanogoClmm from "../src/sdk.js";
 import {
   ADA_UNIT,
@@ -18,6 +19,25 @@ import {
 } from "../src/constants.js";
 import { transformPoolDatum, type PoolDatum } from "../src/datum.js";
 import { getPolicyIdAssetNameFromUnit } from "../src/multiAssets.js";
+
+// The fixture's pool-script UTxO carries a stand-in script — this SDK verifies
+// that script's real hash against POOL_SCRIPT_HASH_MAINNET, which no fixture
+// bytes can be made to hash to. The mock stands in for that one fixed policy;
+// every other script (there are none, in this file) still hashes for real.
+vi.mock("@evolution-sdk/evolution/ScriptHash", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@evolution-sdk/evolution/ScriptHash")>();
+  return {
+    ...actual,
+    fromScript: (script: unknown) => {
+      const bytes = (script as { bytes?: Uint8Array }).bytes;
+      if (bytes && bytes.length === 4 && bytes[0] === 9 && bytes[1] === 9) {
+        return actual.fromHex(POOL_SCRIPT_HASH_MAINNET);
+      }
+      return actual.fromScript(script as never);
+    },
+  };
+});
 
 const POOL_TX = "a".repeat(64);
 const POOL_OUT_REF = `${POOL_TX}#0`;
@@ -49,7 +69,12 @@ const datum: PoolDatum = {
   lastWithdrawEpoch: 640,
 };
 
-const utxoAt = (txId: string, assets: Assets.Assets, datumOption?: InlineDatum) =>
+const utxoAt = (
+  txId: string,
+  assets: Assets.Assets,
+  datumOption?: InlineDatum,
+  scriptRef?: PlutusV3.PlutusV3,
+) =>
   new UTxO.UTxO({
     transactionId: TransactionHash.fromHex(txId),
     index: 0n,
@@ -59,7 +84,11 @@ const utxoAt = (txId: string, assets: Assets.Assets, datumOption?: InlineDatum) 
     }),
     assets,
     datumOption,
+    scriptRef,
   });
+
+/** Stands in for the real pool validator; mocked to hash to POOL_SCRIPT_HASH_MAINNET above. */
+const poolScript = new PlutusV3.PlutusV3({ bytes: new Uint8Array([9, 9, 9, 9]) });
 
 const poolUtxo = () => {
   const nft = getPolicyIdAssetNameFromUnit(
@@ -91,7 +120,9 @@ const client = (): SigningClient =>
           ),
         ];
       }
-      return [utxoAt("c".repeat(64), Assets.fromLovelace(5_000_000n))];
+      return [
+        utxoAt("c".repeat(64), Assets.fromLovelace(5_000_000n), undefined, poolScript),
+      ];
     },
   }) as unknown as SigningClient;
 

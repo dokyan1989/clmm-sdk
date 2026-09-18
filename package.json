@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@cardano-ogmios/schema": "^7.0.0",
-    "@evolution-sdk/evolution": "0.3.32"
+    "@evolution-sdk/evolution": "^0.5.13"
   },
   "devDependencies": {
     "@types/node": "^22.20.3",

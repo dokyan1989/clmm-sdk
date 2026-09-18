@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SigningClient } from "@evolution-sdk/evolution";
+import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
 import DanogoClmm from "../src/sdk.js";
 
 const POOL_A = `${"a".repeat(64)}#0`;

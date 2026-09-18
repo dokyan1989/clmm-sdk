@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { Data } from "@evolution-sdk/evolution";
-import { InlineDatum } from "@evolution-sdk/evolution/InlineDatum";
 import { parseDatum, transformPoolDatum, type PoolDatum } from "../src/datum.js";
 import { ADA_UNIT } from "../src/constants.js";
 
@@ -42,19 +41,17 @@ const fields = (): Data.Data[] => [
   640n,
 ];
 
-const asDatum = (data: Data.Data) => new InlineDatum({ data });
-
 describe("pool datum", () => {
   it("round-trips a datum the SDK itself encoded", () => {
-    expect(parseDatum(transformPoolDatum(datum))).toEqual(datum);
+    expect(parseDatum(transformPoolDatum(datum).data)).toEqual(datum);
   });
 
   it("parses the hand-built field list identically", () => {
-    expect(parseDatum(asDatum(Data.constr(0n, fields())))).toEqual(datum);
+    expect(parseDatum(Data.constr(0n, fields()))).toEqual(datum);
   });
 
   it("rejects a closed pool's constructor", () => {
-    expect(() => parseDatum(asDatum(Data.constr(1n, [])))).toThrow(
+    expect(() => parseDatum(Data.constr(1n, []))).toThrow(
       /must be constructor 0/,
     );
   });
@@ -64,7 +61,7 @@ describe("pool datum", () => {
     // twelve fields would drop the rest on the floor.
     const wide = Data.constr(0n, [...fields(), 0n, 0n]);
 
-    expect(() => parseDatum(asDatum(wide))).toThrow(
+    expect(() => parseDatum(wide)).toThrow(
       /must have 12 fields, got 14/,
     );
   });
@@ -72,7 +69,7 @@ describe("pool datum", () => {
   it("rejects a truncated datum instead of reading a missing epoch as NaN", () => {
     const short = Data.constr(0n, fields().slice(0, 11));
 
-    expect(() => parseDatum(asDatum(short))).toThrow(
+    expect(() => parseDatum(short)).toThrow(
       /must have 12 fields, got 11/,
     );
   });
@@ -85,10 +82,10 @@ describe("pool datum", () => {
     const bentEpoch = fields();
     bentEpoch[11] = [];
 
-    expect(() => parseDatum(asDatum(Data.constr(0n, bentRate)))).toThrow(
+    expect(() => parseDatum(Data.constr(0n, bentRate))).toThrow(
       /lpFeeRate must be an integer/,
     );
-    expect(() => parseDatum(asDatum(Data.constr(0n, bentEpoch)))).toThrow(
+    expect(() => parseDatum(Data.constr(0n, bentEpoch))).toThrow(
       /lastWithdrawEpoch must be an integer/,
     );
   });
@@ -97,7 +94,7 @@ describe("pool datum", () => {
     const bentRatio = fields();
     bentRatio[6] = Data.constr(0n, [[], 10000000000000000n]);
 
-    expect(() => parseDatum(asDatum(Data.constr(0n, bentRatio)))).toThrow(
+    expect(() => parseDatum(Data.constr(0n, bentRatio))).toThrow(
       /sqrtLowerPrice numerator must be an integer/,
     );
   });

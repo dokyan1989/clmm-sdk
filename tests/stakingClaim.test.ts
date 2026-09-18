@@ -1,19 +1,38 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   Address,
   Assets,
   Credential,
   Data,
   ScriptHash,
-  SigningClient,
   TransactionHash,
   UTxO,
 } from "@evolution-sdk/evolution";
+import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
 import { InlineDatum } from "@evolution-sdk/evolution/InlineDatum";
 import * as PlutusV3 from "@evolution-sdk/evolution/PlutusV3";
 import { fromScript } from "@evolution-sdk/evolution/ScriptHash";
 import DanogoClmm from "../src/sdk.js";
 import { ADA_UNIT, POOL_SCRIPT_HASH_MAINNET } from "../src/constants.js";
+
+// This SDK now verifies the pool-script UTxO's real hash against
+// POOL_SCRIPT_HASH_MAINNET, which no fixture bytes can be made to hash to.
+// POOL_SCRIPT (bytes [3,3,3,3] below) stands in for that one fixed policy;
+// the staking scripts in this file still hash for real.
+vi.mock("@evolution-sdk/evolution/ScriptHash", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@evolution-sdk/evolution/ScriptHash")>();
+  return {
+    ...actual,
+    fromScript: (script: unknown) => {
+      const bytes = (script as { bytes?: Uint8Array }).bytes;
+      if (bytes && bytes.length === 4 && bytes[0] === 3 && bytes[1] === 3) {
+        return actual.fromHex(POOL_SCRIPT_HASH_MAINNET);
+      }
+      return actual.fromScript(script as never);
+    },
+  };
+});
 import { transformPoolDatum, type PoolDatum } from "../src/datum.js";
 import { getEpoch } from "../src/utils.js";
 import { getPolicyIdAssetNameFromUnit } from "../src/multiAssets.js";
@@ -25,6 +44,9 @@ const TOKEN_Y =
 const NFT_NAME = "aabbccdd";
 
 const CURRENT_EPOCH = getEpoch(Date.now(), 1);
+
+/** Stands in for the real pool validator; mocked to hash to POOL_SCRIPT_HASH_MAINNET above. */
+const POOL_SCRIPT = new PlutusV3.PlutusV3({ bytes: new Uint8Array([3, 3, 3, 3]) });
 
 /** The pool's own staking sub-validator. */
 const POOL_STAKING_SCRIPT = new PlutusV3.PlutusV3({
@@ -113,7 +135,7 @@ const clientFor = (pool: UTxO.UTxO, staking: UTxO.UTxO): SigningClient => {
     getUtxosByOutRef: async () => {
       fetches += 1;
       if (fetches === 1) return [pool];
-      if (fetches === 2) return [scriptUtxo()];
+      if (fetches === 2) return [scriptUtxo(POOL_SCRIPT)];
       if (fetches === 3) return [configUtxo()];
       return [staking];
     },

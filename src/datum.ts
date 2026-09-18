@@ -114,16 +114,19 @@ export const tokenIdToTuple = (tokenId: string): [string, string] => {
   }
 };
 
-/** @internal */
-export const parseDatum = (datumHex: string | InlineDatum): PoolDatum => {
+/**
+ * @internal
+ * @param datum Either the raw CBOR hex of an Ogmios transaction output's datum,
+ * or already-decoded Plutus data — a UTxO's inline datum, or a hash-referenced
+ * datum resolved separately (datum hashes carry no data of their own to parse).
+ */
+export const parseDatum = (datum: string | Data.Data): PoolDatum => {
   let decoded: any;
 
-  if (typeof datumHex === "string") {
-    decoded = CBOR.fromCBORHex(datumHex);
+  if (typeof datum === "string") {
+    decoded = CBOR.fromCBORHex(datum);
   } else {
-    // InlineDatum stores Data, not a hex string
-    const inlineData = datumHex.data;
-    const inlineHex = Data.toCBORHex(inlineData);
+    const inlineHex = Data.toCBORHex(datum);
     decoded = CBOR.fromCBORHex(inlineHex);
   }
 
@@ -197,11 +200,9 @@ export const parseDatum = (datumHex: string | InlineDatum): PoolDatum => {
 };
 
 /** @internal */
-export const parseProtocolConfigDatum = (datumHex: InlineDatum): ProtocolConfigDatum => {
-  let decoded: any;
-
-  const inlineHex = Data.toCBORHex(datumHex.data);
-  decoded = CBOR.fromCBORHex(inlineHex);
+export const parseProtocolConfigDatum = (data: Data.Data): ProtocolConfigDatum => {
+  const inlineHex = Data.toCBORHex(data);
+  const decoded = CBOR.fromCBORHex(inlineHex);
 
   // Plutus Data is typically encoded as a Tagged value (Tag 121 for Constr 0)
   // The value inside is an array of fields.

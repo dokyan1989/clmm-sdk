@@ -1,14 +1,14 @@
 import {
   AssetName,
+  Data,
   PolicyId,
   RewardAccount,
   RewardAddress,
-  SigningClient,
   UTxO,
 } from "@evolution-sdk/evolution";
+import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
 import * as TxOut from "@evolution-sdk/evolution/TxOut";
 import { SigningTransactionBuilder } from "@evolution-sdk/evolution/sdk/builders/TransactionBuilder";
-import { InlineDatum } from "@evolution-sdk/evolution/InlineDatum";
 import * as ScriptHash from "@evolution-sdk/evolution/ScriptHash";
 import {
   fromScript,
@@ -117,21 +117,16 @@ class DanogoClmm {
 
     // Fetch protocol config
     const protocolConfigUtxo = await this.getUtxoOrThrow(client, protocolConfigOutRef, "Protocol config");
-    if (!protocolConfigUtxo.datumOption) {
-      throw new Error("Protocol config UTxO does not contain a datum.");
-    }
-    const protocolConfigDatum = parseProtocolConfigDatum(protocolConfigUtxo.datumOption as InlineDatum);
+    const protocolConfigDatum = parseProtocolConfigDatum(
+      await this.resolveDatum(client, protocolConfigUtxo, "Protocol config UTxO"),
+    );
 
     // Prepare pool data for calculation
     const poolsData = await Promise.all(
       request.pools.map(async (pool, index) => {
         const poolUtxo = poolUtxos[index];
-        if (!poolUtxo.datumOption) {
-          throw new Error(`Pool input UTxO ${index} does not contain a datum.`);
-        }
-
         const poolDatum: PoolDatum = parseDatum(
-          poolUtxo.datumOption as InlineDatum,
+          await this.resolveDatum(client, poolUtxo, `Pool input UTxO ${index}`),
         );
         this.assertMeetsPoolMinimum(
           poolDatum,
@@ -243,13 +238,17 @@ class DanogoClmm {
       request.protocolConfigOutRef ?? config.protocolScriptOutRef;
 
     const poolScriptUtxo = await this.getUtxoOrThrow(client, poolScriptOutRef, "Pool script");
+    const poolScriptCredential = this.assertPoolScriptMatches(
+      poolScriptUtxo,
+      config.poolScriptHash,
+      poolScriptOutRef,
+    );
 
     // Fetch protocol config
     const protocolConfigUtxo = await this.getUtxoOrThrow(client, protocolConfigOutRef, "Protocol config");
-    if (!protocolConfigUtxo.datumOption) {
-      throw new Error("Protocol config UTxO does not contain a datum.");
-    }
-    const protocolConfigDatum = parseProtocolConfigDatum(protocolConfigUtxo.datumOption as InlineDatum);
+    const protocolConfigDatum = parseProtocolConfigDatum(
+      await this.resolveDatum(client, protocolConfigUtxo, "Protocol config UTxO"),
+    );
 
     // Prepare pool data and calculate swap results
     const poolsData = [];
@@ -261,12 +260,8 @@ class DanogoClmm {
       const pool = request.pools[i];
       const poolUtxo = poolUtxos[i];
 
-      if (!poolUtxo.datumOption) {
-        throw new Error(`Pool input UTxO ${i} does not contain a datum.`);
-      }
-
       const poolDatum: PoolDatum = parseDatum(
-        poolUtxo.datumOption as InlineDatum,
+        await this.resolveDatum(client, poolUtxo, `Pool input UTxO ${i}`),
       );
       this.assertMeetsPoolMinimum(poolDatum, pool.deltaAmount, pool.poolOutRef);
       const tokenA = getPolicyIdAssetNameFromUnit(poolDatum.tokenX);
@@ -371,13 +366,6 @@ class DanogoClmm {
       protocolConfigUtxo,
       referenceInputs,
     );
-
-    if (!poolScriptUtxo.scriptRef) {
-      throw new Error(
-        `Pool script reference ${poolScriptOutRef} carries no script.`,
-      );
-    }
-    const poolScriptCredential = fromScript(poolScriptUtxo.scriptRef);
 
     // Add withdrawal
     tx = tx.withdraw({
@@ -601,6 +589,30 @@ class DanogoClmm {
     return concentratedPools;
   }
 
+  /**
+   * `poolScriptOutRef` and `poolScriptHash` are two separate constants in
+   * `constants.ts`, kept in sync by hand. This confirms the script the ref
+   * input actually resolves to hashes to the credential every pool address is
+   * checked against, rather than assuming the two were updated together.
+   */
+  private assertPoolScriptMatches(
+    poolScriptUtxo: UTxO.UTxO,
+    scriptHash: string,
+    outRef: string,
+  ): ScriptHash.ScriptHash {
+    if (!poolScriptUtxo.scriptRef) {
+      throw new Error(`Pool script reference ${outRef} carries no script.`);
+    }
+    const credential = fromScript(poolScriptUtxo.scriptRef);
+    const resolvedHash = toScriptHashHex(credential);
+    if (resolvedHash !== scriptHash) {
+      throw new Error(
+        `Pool script reference ${outRef} resolves to ${resolvedHash}, but the configured pool script hash is ${scriptHash}.`,
+      );
+    }
+    return credential;
+  }
+
   /** Anyone can park a UTxO with a crafted datum at the pool address, so the validity NFT is what identifies a real pool. */
   private derivePoolNft(
     poolUtxo: UTxO.UTxO,
@@ -820,6 +832,28 @@ class DanogoClmm {
         `Staking reference for pool ${outRef} holds script ${referenced}, but the pool delegates to ${expected}.`,
       );
     }
+  }
+
+  /**
+   * A UTxO's datum is inline only if the transaction that created it chose to
+   * pay the extra bytes; otherwise the ledger stores just a hash, and the
+   * provider hands that back as a `DatumHash` rather than resolving it. Every
+   * real pool and protocol-config UTxO on Danogo mainnet and preprod stores a
+   * hash, not an inline datum, so skipping this resolution step is not an edge
+   * case — it is the reason parsing a live UTxO would fail every time.
+   */
+  private async resolveDatum(
+    client: SigningClient,
+    utxo: UTxO.UTxO,
+    description: string,
+  ): Promise<Data.Data> {
+    if (!utxo.datumOption) {
+      throw new Error(`${description} does not contain a datum.`);
+    }
+    if (utxo.datumOption._tag === "InlineDatum") {
+      return utxo.datumOption.data;
+    }
+    return client.getDatum(utxo.datumOption);
   }
 
   /**

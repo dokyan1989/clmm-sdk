@@ -12,9 +12,35 @@ npm install danogo-clmm
 
 This SDK requires:
 - Node.js 18+
-- `@evolution-sdk/evolution` version `0.3.32` for wallet management and transaction building
+- `@evolution-sdk/evolution` version `^0.5.13` for wallet management and transaction building
 - A Kupmios provider for blockchain data and transaction submission
 - Support network: Preprod & Mainnet
+
+### ⚠️ Ogmios version requirement (Kupmios provider only)
+
+If you use the Kupmios provider, **Ogmios must be new enough that
+`queryLedgerState/rewardAccountSummaries` returns a JSON array** (the shape
+`@evolution-sdk/evolution@0.5.13`'s Kupmios adapter expects). Older Ogmios
+releases return a JSON object instead (keyed by credential, with a
+`delegate` field instead of `stakePool`) for the same query — confirmed at
+least as late as v6.11.2, fixed by v6.14.0 (the exact version the shape
+changed in between those two hasn't been pinned down).
+
+On an older Ogmios, any swap through a pool that holds ADA and hasn't yet
+claimed its current epoch's staking reward will fail with something like:
+
+```
+ProviderError: Kupmios getDelegation failed
+[cause]: ParseError: JSONRPCSchema … Expected ReadonlyArray<…>, actual {}
+```
+
+Pools with no ADA side, or that already claimed this epoch, are unaffected
+regardless of Ogmios version — so this can pass testing on some pools and
+only surface later on others. If you hit this, upgrade Ogmios; there is no
+workaround available from this SDK's side, since `getDelegation()`'s
+request/response handling happens entirely inside
+`@evolution-sdk/evolution`'s Kupmios provider, before this SDK ever sees the
+result.
 
 ## Usage
 

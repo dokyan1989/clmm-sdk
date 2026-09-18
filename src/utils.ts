@@ -22,7 +22,7 @@ export function calculateConcentratedPoolSwap(
   deltaAmount: bigint,
   rewardAmount: bigint = 0n,
   platformFeeRate: bigint
-): [bigint, bigint] {
+): { deltaAmount: bigint; outputAmount: bigint; platformFee: bigint } {
   // Constants
   const poolInAmount = deltaAmount < 0n ? -deltaAmount : deltaAmount;
   const excludedADA: bigint = datum.tokenX === ADA_UNIT ? 3_000_000n + BigInt(datum.totalSwapFee) : 0n;
@@ -46,26 +46,40 @@ export function calculateConcentratedPoolSwap(
       liquidity[0] * BigInt(datum.sqrtLowerPriceNum),
       liquidity[1] * BigInt(datum.sqrtLowerPriceDen)
     ) + activeReserveY;
-  if (deltaAmount > 0n)
-    return getPoolChange(
-      poolInAmount,
-      xV,
-      yV,
-      activeReserveY,
-      BigInt(datum.lpFeeRate),
-      platformFeeRate
-    );
-  return getPoolChange(
-    poolInAmount,
-    yV,
-    xV,
-    activeReserveX,
-    BigInt(datum.lpFeeRate),
-    platformFeeRate
-  );
+
+  const sign = deltaAmount > 0n ? 1n : -1n;
+  const [actualIn, outputAmount, platformFee] =
+    deltaAmount > 0n
+      ? getPoolChange(
+          poolInAmount,
+          xV,
+          yV,
+          activeReserveY,
+          BigInt(datum.lpFeeRate),
+          platformFeeRate
+        )
+      : getPoolChange(
+          poolInAmount,
+          yV,
+          xV,
+          activeReserveX,
+          BigInt(datum.lpFeeRate),
+          platformFeeRate
+        );
+
+  return { deltaAmount: sign * actualIn, outputAmount, platformFee };
 }
 
-/** @internal */
+/**
+ * Bonding-curve output with LP fee. When the naive output would meet or
+ * exceed the pool's real reserve, caps the output at that reserve and
+ * back-computes the (necessarily smaller) input that actually produces it,
+ * instead of refusing the trade outright — mirroring the reference
+ * implementation's handling of this boundary. The platform fee is charged
+ * on the amount actually taken, not the amount originally offered, so a
+ * capped swap isn't overcharged.
+ * @internal
+ */
 const getPoolChange = (
   amountIn: bigint,
   tokenInVirtual: bigint,
@@ -73,13 +87,8 @@ const getPoolChange = (
   tokenOutReal: bigint,
   lpFeeRate: bigint,
   platformFeeRate: bigint
-): [bigint, bigint] => {
+): [bigint, bigint, bigint] => {
   const BASE = 10_000n;
-
-  // Rounded once over the whole product, as the reference implementation does.
-  // Rounding the LP fee first and the platform's share of it second costs a
-  // unit whenever both divisions leave a remainder.
-  const platformFee = (amountIn * lpFeeRate * platformFeeRate) / (BASE * BASE);
   const offFee = BASE - lpFeeRate;
 
   // main math
@@ -89,13 +98,22 @@ const getPoolChange = (
   const numerator = tokenOutVirtual * denominator - virtualProduct * BASE;
   const expectedOut = numerator / denominator;
 
-  // safety check
-  if (expectedOut > tokenOutReal) {
-    throw new Error("pool out exceeded");
+  let actualIn = amountIn;
+  let actualOut = expectedOut;
+  if (expectedOut >= tokenOutReal) {
+    actualOut = tokenOutReal;
+    actualIn = ceilDiv(
+      tokenInVirtual * actualOut * BASE,
+      (tokenOutVirtual - actualOut) * offFee
+    );
   }
 
-  // return tuple: [expectedTokenOut, fee]
-  return [expectedOut, platformFee];
+  // Rounded once over the whole product, as the reference implementation does.
+  // Rounding the LP fee first and the platform's share of it second costs a
+  // unit whenever both divisions leave a remainder.
+  const platformFee = (actualIn * lpFeeRate * platformFeeRate) / (BASE * BASE);
+
+  return [actualIn, actualOut, platformFee];
 };
 
 /** @internal */
@@ -196,7 +214,13 @@ export function calculateMultiPoolSwap(
 
     if (deltaAmount === 0n) continue;
 
-    const [outputAmount, platformFee] = calculateConcentratedPoolSwap(
+    // adjustedDeltaAmount may be smaller in magnitude than the requested
+    // deltaAmount (same sign) when the pool's reserve capped the swap.
+    const {
+      deltaAmount: adjustedDeltaAmount,
+      outputAmount,
+      platformFee,
+    } = calculateConcentratedPoolSwap(
       pool.tokenAAmount,
       pool.tokenBAmount,
       pool.datum,
@@ -207,7 +231,7 @@ export function calculateMultiPoolSwap(
 
     results.push({
       poolIndex: i,
-      deltaAmount,
+      deltaAmount: adjustedDeltaAmount,
       outputAmount,
       platformFee
     });

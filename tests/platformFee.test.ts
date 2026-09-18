@@ -34,7 +34,7 @@ const feeFor = (amountIn: bigint, platformFeeRate: bigint): bigint =>
     amountIn,
     0n,
     platformFeeRate,
-  )[1];
+  ).platformFee;
 
 /** What this SDK used to compute: the LP fee rounded first, its share rounded second. */
 const roundedTwice = (amountIn: bigint, platformFeeRate: bigint): bigint =>

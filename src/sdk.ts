@@ -335,6 +335,15 @@ class DanogoClmm {
       }
     });
 
+    // A pool's own reserve can cap a swap to less than requested (see
+    // calculateConcentratedPoolSwap), which is the amount actually reflected
+    // in the pool's output assets/datum below — the redeemer must name that
+    // same amount, not the caller's original request, or the two disagree.
+    const redeemerDeltaAmounts = poolsData.map((_, index) => {
+      const result = swapResults.find((r) => r.poolIndex === index);
+      return result ? result.deltaAmount : deltaAmounts[index];
+    });
+
     // Pool outputs are appended in pool order below, ahead of any change output,
     // so this is the index the redeemer must name for each pool.
     let nextOutputIndex = 0;
@@ -374,7 +383,7 @@ class DanogoClmm {
       redeemer: swapTokensRedeemer(
         null,
         poolUtxos,
-        deltaAmounts,
+        redeemerDeltaAmounts,
         poolOutputIndices,
         protocolConfigIdx,
       ),
@@ -429,7 +438,7 @@ class DanogoClmm {
         redeemer: swapTokensRedeemer(
           pool.utxo,
           poolUtxos,
-          deltaAmounts,
+          redeemerDeltaAmounts,
           poolOutputIndices,
           protocolConfigIdx,
         ),
@@ -452,7 +461,7 @@ class DanogoClmm {
             redeemer: swapTokensRedeemer(
               pool.utxo,
               poolUtxos,
-              deltaAmounts,
+              redeemerDeltaAmounts,
               poolOutputIndices,
               protocolConfigIdx,
             ),

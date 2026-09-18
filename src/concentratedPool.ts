@@ -29,10 +29,17 @@ export interface SwapRequest {
   pools: {
     poolOutRef: string;
     deltaAmount: bigint;
-    minOutChangeAmount?: bigint;
+    /** Minimum output accepted from this pool. Use `0n` to swap at any price. */
+    minOutChangeAmount: bigint;
     stakingOutRef?: string;
   }[];
   protocolConfigOutRef?: string;
+  /**
+   * Current Cardano epoch. Defaults to one derived from this machine's clock,
+   * which a skewed clock gets wrong near an epoch boundary; pass the epoch read
+   * from the chain if you have it.
+   */
+  currentEpoch?: number;
 }
 
 
@@ -43,4 +50,6 @@ export interface QuoteSwapRequest {
     stakingOutRef?: string;
   }[];
   protocolConfigOutRef?: string;
+  /** See {@link SwapRequest.currentEpoch}. */
+  currentEpoch?: number;
 }

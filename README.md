@@ -12,7 +12,7 @@ npm install danogo-clmm
 
 This SDK requires:
 - Node.js 18+
-- `@evolution-sdk/evolution` version `0.32.2` for wallet management and transaction building
+- `@evolution-sdk/evolution` version `0.3.32` for wallet management and transaction building
 - A Kupmios provider for blockchain data and transaction submission
 - Support network: Preprod & Mainnet
 
@@ -89,7 +89,9 @@ const txHash = await danogoClmm.submitSwap(evolutionClient, {
 
 ### 4. Get Pool Info from Ogmios Transaction
 
-Extract pool data directly from an Ogmios transaction object.
+Extract pool data directly from an Ogmios transaction object. This example drives
+the chain-synchronization client yourself, so install `@cardano-ogmios/client`
+alongside the SDK.
 
 ```typescript
 import DanogoClmm from "danogo-clmm";

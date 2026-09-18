@@ -37,6 +37,7 @@ export const swapTokensRedeemer = (
   targetPoolUTxO: UTxO.UTxO | null,
   poolInUTxOs: UTxO.UTxO[],
   deltaAmounts: bigint[],
+  poolOutputIndices: number[],
   protocolConfigIdx: bigint,
 ): RedeemerArg => {
   try {
@@ -52,27 +53,44 @@ export const swapTokensRedeemer = (
       );
       const actionBytes = bigintToBytesPadded(SWAP_ACTION, 1);
 
-      const poolEntries = poolInUTxOs.map((poolUtxo, poolOutIdx) => {
-        // Find this pool UTxO's index in indexedInputs
-        const indexedInput = indexedInputs.find(
-          (input) =>
-            input.utxo.transactionId === poolUtxo.transactionId &&
-            input.utxo.index === poolUtxo.index,
-        );
-        if (!indexedInput) {
-          throw new Error(
-            `Pool UTxO at ${poolOutIdx} not found in indexedInputs`,
+      const poolEntries = poolInUTxOs
+        .map((poolUtxo, poolOutIdx) => {
+          // Find this pool UTxO's index in indexedInputs
+          const indexedInput = indexedInputs.find(
+            (input) =>
+              input.utxo.transactionId === poolUtxo.transactionId &&
+              input.utxo.index === poolUtxo.index,
           );
-        }
-        if (deltaAmounts[poolOutIdx] === undefined)
-          throw new Error(
-            `deltaAmount for poolOutIdx ${poolOutIdx} is undefined`,
-          );
-        const poolInBytes = bigintToBytesPadded(BigInt(indexedInput.index), 1);
-        const poolOutBytes = bigintToBytesPadded(BigInt(poolOutIdx), 1);
-        const amountBytes = bigintToBytesPadded(deltaAmounts[poolOutIdx], 32);
-        return { poolInBytes, poolOutBytes, amountBytes };
-      });
+          if (!indexedInput) {
+            throw new Error(
+              `Pool UTxO at ${poolOutIdx} not found in indexedInputs`,
+            );
+          }
+          if (deltaAmounts[poolOutIdx] === undefined)
+            throw new Error(
+              `deltaAmount for poolOutIdx ${poolOutIdx} is undefined`,
+            );
+          // Where the caller placed this pool's re-created output, rather than an
+          // assumption that the outputs mirror the order the pools were passed in.
+          const poolOutputIndex = poolOutputIndices[poolOutIdx];
+          if (poolOutputIndex === undefined || poolOutputIndex < 0) {
+            throw new Error(
+              `Pool UTxO at ${poolOutIdx} has no output index in this transaction`,
+            );
+          }
+          const poolInBytes = bigintToBytesPadded(BigInt(indexedInput.index), 1);
+          const poolOutBytes = bigintToBytesPadded(BigInt(poolOutputIndex), 1);
+          const amountBytes = bigintToBytesPadded(deltaAmounts[poolOutIdx], 32);
+          return {
+            poolInputIndex: indexedInput.index,
+            poolInBytes,
+            poolOutBytes,
+            amountBytes,
+          };
+        })
+        // The validator matches these against the canonically sorted transaction
+        // inputs, so they must ascend by input index rather than by request order.
+        .sort((a, b) => a.poolInputIndex - b.poolInputIndex);
 
       // 1 byte for firstBytes, 1 byte for actionBytes, 34 bytes for each pool entry (poolIn, poolOut, amount)
       const totalLength = 2 + 34 * poolEntries.length;

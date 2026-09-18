@@ -76,9 +76,10 @@ const getPoolChange = (
 ): [bigint, bigint] => {
   const BASE = 10_000n;
 
-  // fee calculations
-  const lpFee = (amountIn * lpFeeRate) / BASE;
-  const platformFee = (lpFee * BigInt(platformFeeRate)) / 10_000n;
+  // Rounded once over the whole product, as the reference implementation does.
+  // Rounding the LP fee first and the platform's share of it second costs a
+  // unit whenever both divisions leave a remainder.
+  const platformFee = (amountIn * lpFeeRate * platformFeeRate) / (BASE * BASE);
   const offFee = BASE - lpFeeRate;
 
   // main math
@@ -142,15 +143,34 @@ function ceilDiv(a: bigint, b: bigint): bigint {
   return r === 0n || a < 0n !== b < 0n ? q : q + 1n;
 }
 
+/** Anything carrying an output reference: a UTxO before the transaction is built, a TransactionInput after. */
+interface HasOutRef {
+  transactionId: TransactionHash.TransactionHash;
+  index: bigint;
+}
+
 /** @internal */
-export function getPoolProtocolConfigIdx(protocolConfigUTxO: UTxO.UTxO, refInputs: UTxO.UTxO[]): bigint {
-  const sortedInputs = [...refInputs].sort((a: UTxO.UTxO, b: UTxO.UTxO) => {
-    if (a.transactionId === b.transactionId) return a.index < b.index ? -1 : 1;
-    return a.transactionId < b.transactionId ? -1 : 1;
-  });
-  const idx = sortedInputs.findIndex(
-    (input) => input.transactionId === protocolConfigUTxO.transactionId && input.index === protocolConfigUTxO.index
-  );
+export const outRefKey = (input: HasOutRef): string =>
+  `${TransactionHash.toHex(input.transactionId)}#${input.index}`;
+
+const compareOutRefs = (a: HasOutRef, b: HasOutRef): number => {
+  const aId = TransactionHash.toHex(a.transactionId);
+  const bId = TransactionHash.toHex(b.transactionId);
+  if (aId !== bId) return aId < bId ? -1 : 1;
+  if (a.index === b.index) return 0;
+  return a.index < b.index ? -1 : 1;
+};
+
+/** @internal */
+export function getPoolProtocolConfigIdx(
+  protocolConfigUTxO: HasOutRef,
+  refInputs: ReadonlyArray<HasOutRef>,
+): bigint {
+  // The validator reads reference inputs in the ledger's canonical order, not
+  // the order they were added in.
+  const sortedInputs = [...refInputs].sort(compareOutRefs);
+  const wanted = outRefKey(protocolConfigUTxO);
+  const idx = sortedInputs.findIndex((input) => outRefKey(input) === wanted);
   if (idx === -1) {
     throw new Error("Protocol config out ref not found in reference inputs");
   }

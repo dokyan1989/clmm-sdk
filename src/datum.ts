@@ -24,6 +24,18 @@ export interface ProtocolConfigDatum {
   swapFee: bigint
 }
 
+const BASIS_POINTS = 10_000n;
+const CONSTR_0_TAG = 121;
+const POOL_DATUM_FIELDS = 12;
+
+/** CBOR arrays and byte strings coerce through BigInt() to plausible numbers, so reject anything that is not an integer. */
+const asInteger = (field: unknown, name: string): bigint => {
+  if (typeof field !== "bigint" && typeof field !== "number") {
+    throw new Error(`${name} must be an integer`);
+  }
+  return BigInt(field);
+};
+
 /** @internal */
 export const transformPoolDatum = (datum: PoolDatum): InlineDatum => {
   // Create arrays for tokenX and tokenY
@@ -115,12 +127,24 @@ export const parseDatum = (datumHex: string | InlineDatum): PoolDatum => {
     decoded = CBOR.fromCBORHex(inlineHex);
   }
 
-  // Plutus Data is typically encoded as a Tagged value (Tag 121 for Constr 0)
-  // The value inside is an array of fields.
-  const fields = (decoded as any)._tag === "Tag" ? (decoded as any).value : decoded;
+  // Plutus Data is encoded as a Tagged value (Tag 121 for Constr 0). A closed
+  // pool collapses to another constructor, so the tag distinguishes the two.
+  if (decoded?._tag !== "Tag" || decoded.tag !== CONSTR_0_TAG) {
+    throw new Error(
+      `Pool datum must be constructor 0 (CBOR tag ${CONSTR_0_TAG}), got tag ${decoded?.tag}`,
+    );
+  }
+  const fields = decoded.value;
 
   if (!Array.isArray(fields)) {
     throw new Error("Invalid datum structure: expected array of fields");
+  }
+  // Re-encoding drops whatever this does not read, so a datum of an unexpected
+  // width must fail rather than be silently rewritten without its extra fields.
+  if (fields.length !== POOL_DATUM_FIELDS) {
+    throw new Error(
+      `Pool datum must have ${POOL_DATUM_FIELDS} fields, got ${fields.length}`,
+    );
   }
 
   // Helper to parse AssetClass (Constr 0 [PolicyId, AssetName])
@@ -140,29 +164,35 @@ export const parseDatum = (datumHex: string | InlineDatum): PoolDatum => {
   };
 
   // Helper to parse Ratio (Constr 0 [Numerator, Denominator])
-  const parseRatio = (field: any): { num: bigint; den: bigint } => {
+  const parseRatio = (field: any, name: string): { num: bigint; den: bigint } => {
     const val = (field as any)._tag === "Tag" ? (field as any).value : field;
     if (Array.isArray(val) && val.length === 2) {
-      return { num: BigInt(val[0]), den: BigInt(val[1]) };
+      return {
+        num: asInteger(val[0], `${name} numerator`),
+        den: asInteger(val[1], `${name} denominator`),
+      };
     }
     throw new Error("Invalid Ratio structure");
   };
 
+  const sqrtLowerPrice = parseRatio(fields[6], "Pool datum sqrtLowerPrice");
+  const sqrtUpperPrice = parseRatio(fields[7], "Pool datum sqrtUpperPrice");
+
   return {
     tokenX: parseAsset(fields[0]),
     tokenY: parseAsset(fields[1]),
-    lpFeeRate: Number(fields[2]),
-    platformFeeX: BigInt(fields[3]),
-    platformFeeY: BigInt(fields[4]),
-    totalSwapFee: BigInt(fields[5]),
-    sqrtLowerPriceNum: parseRatio(fields[6]).num,
-    sqrtLowerPriceDen: parseRatio(fields[6]).den,
-    sqrtUpperPriceNum: parseRatio(fields[7]).num,
-    sqrtUpperPriceDen: parseRatio(fields[7]).den,
-    minXChange: BigInt(fields[8]),
-    minYChange: BigInt(fields[9]),
-    circulatingLPToken: BigInt(fields[10]),
-    lastWithdrawEpoch: Number(fields[11]),
+    lpFeeRate: Number(asInteger(fields[2], "Pool datum lpFeeRate")),
+    platformFeeX: asInteger(fields[3], "Pool datum platformFeeX"),
+    platformFeeY: asInteger(fields[4], "Pool datum platformFeeY"),
+    totalSwapFee: asInteger(fields[5], "Pool datum totalSwapFee"),
+    sqrtLowerPriceNum: sqrtLowerPrice.num,
+    sqrtLowerPriceDen: sqrtLowerPrice.den,
+    sqrtUpperPriceNum: sqrtUpperPrice.num,
+    sqrtUpperPriceDen: sqrtUpperPrice.den,
+    minXChange: asInteger(fields[8], "Pool datum minXChange"),
+    minYChange: asInteger(fields[9], "Pool datum minYChange"),
+    circulatingLPToken: asInteger(fields[10], "Pool datum circulatingLPToken"),
+    lastWithdrawEpoch: Number(asInteger(fields[11], "Pool datum lastWithdrawEpoch")),
   };
 };
 
@@ -180,9 +210,31 @@ export const parseProtocolConfigDatum = (datumHex: InlineDatum): ProtocolConfigD
   if (!Array.isArray(fields)) {
     throw new Error("Invalid datum structure: expected array of fields");
   }
+  if (fields.length < 2) {
+    throw new Error(
+      `Protocol config datum must have at least 2 fields, got ${fields.length}`,
+    );
+  }
 
-  return {
-    platformFeeRate: BigInt(fields[0]),
-    swapFee: BigInt(fields[1]),
-  };
+  const platformFeeRate = asInteger(
+    fields[0],
+    "Protocol config platformFeeRate",
+  );
+  const swapFee = asInteger(fields[1], "Protocol config swapFee");
+
+  // platformFeeRate is the protocol's share of the LP fee in basis points, so
+  // anything above BASE would hand the protocol more than the whole LP fee.
+  if (platformFeeRate < 0n || platformFeeRate > BASIS_POINTS) {
+    throw new Error(
+      `Protocol config platformFeeRate must be between 0 and ${BASIS_POINTS} basis points, got ${platformFeeRate}`,
+    );
+  }
+  // swapFee is added to what the wallet pays into the pool; a negative one would drain it.
+  if (swapFee < 0n) {
+    throw new Error(
+      `Protocol config swapFee must not be negative, got ${swapFee}`,
+    );
+  }
+
+  return { platformFeeRate, swapFee };
 };

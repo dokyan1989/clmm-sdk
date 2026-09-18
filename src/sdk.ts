@@ -1,14 +1,23 @@
 import {
+  AssetName,
+  PolicyId,
   RewardAccount,
   RewardAddress,
   SigningClient,
+  TransactionOutput,
   UTxO,
+  Value,
 } from "@evolution-sdk/evolution";
 import { SigningTransactionBuilder } from "@evolution-sdk/evolution/sdk/builders/TransactionBuilder";
 import { InlineDatum } from "@evolution-sdk/evolution/InlineDatum";
-import { fromScript } from "@evolution-sdk/evolution/ScriptHash";
+import * as ScriptHash from "@evolution-sdk/evolution/ScriptHash";
+import {
+  fromScript,
+  toHex as toScriptHashHex,
+} from "@evolution-sdk/evolution/ScriptHash";
 import {
   fromAsset,
+  flatten,
   merge,
   quantityOf,
   fromLovelace,
@@ -37,10 +46,29 @@ import {
   calculateMultiPoolSwap,
   getEpoch,
   getPoolProtocolConfigIdx,
+  outRefKey,
   toEvoOutRef,
 } from "./utils.js";
 import { ADA_UNIT, getNetworkConfig } from "./constants.js";
 import { toHex } from "@evolution-sdk/evolution/Bytes32";
+
+/** Map keys are compared by reference, so asset lookups have to go through the hex form. */
+const holdsNft = (
+  value: Value.Value,
+  policyIdHex: string,
+  assetName: AssetName.AssetName,
+): boolean => {
+  if (!Value.hasAssets(value)) return false;
+
+  const wanted = AssetName.toHex(assetName);
+  for (const [policyId, assets] of value.assets.map.entries()) {
+    if (PolicyId.toHex(policyId) !== policyIdHex) continue;
+    for (const [name, quantity] of assets.entries()) {
+      if (AssetName.toHex(name) === wanted) return quantity === 1n;
+    }
+  }
+  return false;
+};
 
 class DanogoClmm {
   constructor() { }
@@ -83,8 +111,11 @@ class DanogoClmm {
     if (!client || !client.address) {
       throw new Error("Please connect a wallet first.");
     }
+    this.assertNonZeroDeltas(request.pools);
     const networkId = (await client.address()).networkId;
-    const currentEpoch = getEpoch(Date.now(), networkId);
+    const currentEpoch = this.resolveEpoch(request.currentEpoch, networkId);
+
+    const config = getNetworkConfig(networkId);
 
     // Fetch all pool UTxOs
     const poolUtxos = await Promise.all(
@@ -92,8 +123,14 @@ class DanogoClmm {
         this.getUtxoOrThrow(client, pool.poolOutRef, "Pool input")
       )
     );
+    poolUtxos.forEach((poolUtxo, index) =>
+      this.derivePoolNft(
+        poolUtxo,
+        config.poolScriptHash,
+        request.pools[index].poolOutRef,
+      ),
+    );
 
-    const config = getNetworkConfig(networkId);
     const protocolConfigOutRef =
       request.protocolConfigOutRef ?? config.protocolScriptOutRef;
 
@@ -115,6 +152,11 @@ class DanogoClmm {
         const poolDatum: PoolDatum = parseDatum(
           poolUtxo.datumOption as InlineDatum,
         );
+        this.assertMeetsPoolMinimum(
+          poolDatum,
+          pool.deltaAmount,
+          pool.poolOutRef,
+        );
         const tokenA = getPolicyIdAssetNameFromUnit(poolDatum.tokenX);
         const tokenB = getPolicyIdAssetNameFromUnit(poolDatum.tokenY);
         const coin = poolUtxo.assets.lovelace;
@@ -123,21 +165,14 @@ class DanogoClmm {
           return quantityOf(poolUtxo.assets, token.policyId!, token.assetName!);
         };
 
-        let stakingRefUtxo = null;
-        if (pool.stakingOutRef) {
-          stakingRefUtxo = await this.getUtxoOrThrow(client, pool.stakingOutRef, "Staking");
-        }
-        let rewardAmount = 0n;
-        if (
-          tokenA.unit === ADA_UNIT &&
-          stakingRefUtxo &&
-          currentEpoch > poolDatum.lastWithdrawEpoch
-        )
-          rewardAmount = await this.getRewardAmount(
-            client,
-            networkId,
-            stakingRefUtxo,
-          );
+        const stakingCredential = this.resolveEpochClaim(
+          poolUtxo,
+          poolDatum,
+          currentEpoch,
+        );
+        const rewardAmount = stakingCredential
+          ? await this.getRewardAmount(client, networkId, stakingCredential)
+          : 0n;
 
         return {
           tokenAAmount: getTokenAmount(tokenA),
@@ -168,8 +203,8 @@ class DanogoClmm {
    *
    * @param client An initialized SigningClient instance with a connected wallet.
    * @param request The swap request object containing pool references, swap amount, and minimum output.
-   *                - `pools`: Array of pool objects with poolOutRef, deltaAmount, and optional stakingOutRef
-   *                - `minOutChangeAmount`: Minimum acceptable output amount (slippage protection)
+   *                - `pools`: Array of pool objects with poolOutRef, deltaAmount, minOutChangeAmount, and optional stakingOutRef
+   *                - `minOutChangeAmount`: Minimum acceptable output for that pool (slippage protection); `0n` swaps at any price
    *                - `protocolConfigOutRef`: Reference to the protocol configuration UTxO
    * @returns A promise that resolves to the transaction hash.
    *
@@ -180,16 +215,16 @@ class DanogoClmm {
    *     {
    *       poolOutRef: pool1OutRef,
    *       deltaAmount: 500_000n, // 0.5 ADA to pool 1
+   *       minOutChangeAmount: 900_000n, // Minimum 0.9 tokens out of pool 1
    *       stakingOutRef: staking1OutRef
    *     },
    *     {
    *       poolOutRef: pool2OutRef,
    *       deltaAmount: 500_000n, // 0.5 ADA to pool 2
+   *       minOutChangeAmount: 900_000n, // Minimum 0.9 tokens out of pool 2
    *       stakingOutRef: staking2OutRef
    *     }
    *   ],
-   *   poolScriptOutRef: poolScriptRef,
-   *   minOutChangeAmount: 900_000n, // Minimum 0.9 tokens out
    *   protocolConfigOutRef: protocolConfigRef
    * });
    * ```
@@ -201,8 +236,12 @@ class DanogoClmm {
     if (!client || !client.address) {
       throw new Error("Please connect a wallet first.");
     }
+    this.assertNonZeroDeltas(request.pools);
+    this.assertSlippageFloors(request.pools);
     const networkId = (await client.address()).networkId;
-    const currentEpoch = getEpoch(Date.now(), networkId);
+    const currentEpoch = this.resolveEpoch(request.currentEpoch, networkId);
+
+    const config = getNetworkConfig(networkId);
 
     // Fetch all pool UTxOs and script UTxO
     const poolUtxos: UTxO.UTxO[] = await Promise.all(
@@ -210,8 +249,14 @@ class DanogoClmm {
         this.getUtxoOrThrow(client, pool.poolOutRef, "Pool input")
       ),
     );
+    const validityNfts = poolUtxos.map((poolUtxo, index) =>
+      this.derivePoolNft(
+        poolUtxo,
+        config.poolScriptHash,
+        request.pools[index].poolOutRef,
+      ),
+    );
 
-    const config = getNetworkConfig(networkId);
     const poolScriptOutRef = config.poolScriptOutRef;
     const protocolConfigOutRef =
       request.protocolConfigOutRef ?? config.protocolScriptOutRef;
@@ -229,6 +274,7 @@ class DanogoClmm {
     const poolsData = [];
     const stakingUtxos = [];
     const rewardAmounts: bigint[] = [];
+    const stakingCredentials: (ScriptHash.ScriptHash | null)[] = [];
 
     for (let i = 0; i < request.pools.length; i++) {
       const pool = request.pools[i];
@@ -241,6 +287,7 @@ class DanogoClmm {
       const poolDatum: PoolDatum = parseDatum(
         poolUtxo.datumOption as InlineDatum,
       );
+      this.assertMeetsPoolMinimum(poolDatum, pool.deltaAmount, pool.poolOutRef);
       const tokenA = getPolicyIdAssetNameFromUnit(poolDatum.tokenX);
       const tokenB = getPolicyIdAssetNameFromUnit(poolDatum.tokenY);
       const coin = poolUtxo.assets.lovelace;
@@ -249,22 +296,36 @@ class DanogoClmm {
         return quantityOf(poolUtxo.assets, token.policyId!, token.assetName!);
       };
 
+      const stakingCredential = this.resolveEpochClaim(
+        poolUtxo,
+        poolDatum,
+        currentEpoch,
+      );
+      stakingCredentials.push(stakingCredential);
+
       let stakingRefUtxo = null;
       if (pool.stakingOutRef) {
         stakingRefUtxo = await this.getUtxoOrThrow(client, pool.stakingOutRef, "Staking");
+      }
+      if (stakingCredential) {
+        if (!stakingRefUtxo) {
+          throw new Error(
+            `Pool ${pool.poolOutRef} has not claimed its staking rewards this epoch, so the swap must withdraw them. Provide its stakingOutRef.`,
+          );
+        }
+        this.assertStakingRefMatches(
+          stakingRefUtxo,
+          stakingCredential,
+          pool.poolOutRef,
+        );
       }
       stakingUtxos.push(stakingRefUtxo);
 
       // Resolve the staking reward up front so it can be applied consistently
       // both to the swap calculation and to the pool output assets below.
-      let rewardAmount = 0n;
-      if (
-        tokenA.unit === ADA_UNIT &&
-        stakingRefUtxo &&
-        currentEpoch > poolDatum.lastWithdrawEpoch
-      ) {
-        rewardAmount = await this.getRewardAmount(client, networkId, stakingRefUtxo);
-      }
+      const rewardAmount = stakingCredential
+        ? await this.getRewardAmount(client, networkId, stakingCredential)
+        : 0n;
       rewardAmounts.push(rewardAmount);
 
       poolsData.push({
@@ -275,6 +336,8 @@ class DanogoClmm {
         tokenA,
         tokenB,
         rewardAmount,
+        validityNft: validityNfts[i],
+        outRef: pool.poolOutRef,
       });
     }
 
@@ -288,7 +351,7 @@ class DanogoClmm {
 
     // Check output meets minimum for each pool
     swapResults.forEach((result) => {
-      const minOut = request.pools[result.poolIndex].minOutChangeAmount ?? 0n;
+      const minOut = request.pools[result.poolIndex].minOutChangeAmount;
       if (result.outputAmount < minOut) {
         throw new Error(
           `Expected swap output at least ${minOut} but got ${result.outputAmount}`,
@@ -296,15 +359,30 @@ class DanogoClmm {
       }
     });
 
+    // Pool outputs are appended in pool order below, ahead of any change output,
+    // so this is the index the redeemer must name for each pool.
+    let nextOutputIndex = 0;
+    const poolOutputIndices = poolsData.map((_, index) =>
+      swapResults.some((result) => result.poolIndex === index)
+        ? nextOutputIndex++
+        : -1,
+    );
+
     // Initialize transaction builder
     let tx: SigningTransactionBuilder = client.newTx();
 
-    // Add reference inputs
-    const referenceInputs = [protocolConfigUtxo];
-    referenceInputs.push(poolScriptUtxo);
-    stakingUtxos.forEach((staking) => {
-      if (staking) referenceInputs.push(staking);
-    });
+    // Add reference inputs. Pools sharing a staking script would otherwise be
+    // counted twice here while the transaction holds one, shifting every index
+    // the redeemer derives from this list.
+    const referenceInputs = [
+      ...new Map(
+        [
+          protocolConfigUtxo,
+          poolScriptUtxo,
+          ...stakingUtxos.filter((staking) => staking !== null),
+        ].map((utxo) => [outRefKey(utxo), utxo] as const),
+      ).values(),
+    ];
     tx = tx.readFrom({ referenceInputs });
 
     // Process each pool
@@ -313,14 +391,22 @@ class DanogoClmm {
       referenceInputs,
     );
 
+    if (!poolScriptUtxo.scriptRef) {
+      throw new Error(
+        `Pool script reference ${poolScriptOutRef} carries no script.`,
+      );
+    }
+    const poolScriptCredential = fromScript(poolScriptUtxo.scriptRef);
+
     // Add withdrawal
     tx = tx.withdraw({
-      stakeCredential: fromScript(poolScriptUtxo.scriptRef!),
+      stakeCredential: poolScriptCredential,
       amount: 0n,
       redeemer: swapTokensRedeemer(
         null,
         poolUtxos,
         deltaAmounts,
+        poolOutputIndices,
         protocolConfigIdx,
       ),
     });
@@ -332,10 +418,7 @@ class DanogoClmm {
 
       const { deltaAmount, platformFee, outputAmount } = swapResult;
       const rewardAmount = rewardAmounts[i];
-      const rewardApplies =
-        pool.tokenA.unit === ADA_UNIT &&
-        currentEpoch > pool.datum.lastWithdrawEpoch &&
-        !!stakingUtxos[i];
+      const stakingCredential = stakingCredentials[i];
 
       // Transform pool datum
       const transformedDatum = transformPoolDatum({
@@ -360,7 +443,7 @@ class DanogoClmm {
         protocolConfigDatum.swapFee,
       );
       let poolOutAssets = merge(pool.utxo.assets, deltaAssets);
-      if (rewardApplies && rewardAmount > 0n) {
+      if (rewardAmount > 0n) {
         poolOutAssets = merge(poolOutAssets, fromLovelace(rewardAmount));
       }
 
@@ -378,22 +461,40 @@ class DanogoClmm {
           pool.utxo,
           poolUtxos,
           deltaAmounts,
+          poolOutputIndices,
           protocolConfigIdx,
         ),
       });
 
       // Handle staking rewards if applicable
-      if (rewardApplies) {
-        tx = tx.withdraw({
-          stakeCredential: fromScript(stakingUtxos[i]!.scriptRef!),
-          amount: rewardAmount,
-          redeemer: swapTokensRedeemer(
-            pool.utxo,
-            poolUtxos,
-            deltaAmounts,
-            protocolConfigIdx,
-          ),
-        });
+      if (stakingCredential) {
+        // A pool delegating to its own spend script shares a reward account with
+        // the withdrawal that invokes the validator above. Withdrawals are keyed
+        // by reward account, so a second entry here would collide with it rather
+        // than add to it, and that one invocation already covers both purposes.
+        const sharesPoolScriptAccount =
+          toScriptHashHex(stakingCredential) ===
+          toScriptHashHex(poolScriptCredential);
+
+        if (!sharesPoolScriptAccount) {
+          tx = tx.withdraw({
+            stakeCredential: stakingCredential,
+            amount: rewardAmount,
+            redeemer: swapTokensRedeemer(
+              pool.utxo,
+              poolUtxos,
+              deltaAmounts,
+              poolOutputIndices,
+              protocolConfigIdx,
+            ),
+          });
+        } else if (rewardAmount > 0n) {
+          // The shared entry withdraws 0, and Cardano has no partial withdrawal,
+          // so the reward cannot be collected through it.
+          throw new Error(
+            `Pool ${pool.outRef} delegates to its own spend script and has ${rewardAmount} lovelace of rewards, which this swap cannot withdraw.`,
+          );
+        }
       }
     }
 
@@ -411,6 +512,22 @@ class DanogoClmm {
     const builtTx = await tx.build({
       scriptDataFormat: "array",
     });
+    const body = (await builtTx.toTransaction()).body;
+    this.assertPoolOutputsAt(
+      body.outputs,
+      poolsData,
+      poolOutputIndices,
+      config.poolScriptHash,
+    );
+    const settledConfigIdx = getPoolProtocolConfigIdx(
+      protocolConfigUtxo,
+      body.referenceInputs ?? [],
+    );
+    if (settledConfigIdx !== protocolConfigIdx) {
+      throw new Error(
+        `The redeemer points the validator at reference input ${protocolConfigIdx} for the protocol config, but the built transaction puts it at ${settledConfigIdx}.`,
+      );
+    }
     const signedTx = await builtTx.sign();
     const txHash = await signedTx.submit();
     return toHex(txHash.hash);
@@ -500,6 +617,122 @@ class DanogoClmm {
     return concentratedPools;
   }
 
+  /** Anyone can park a UTxO with a crafted datum at the pool address, so the validity NFT is what identifies a real pool. */
+  private derivePoolNft(
+    poolUtxo: UTxO.UTxO,
+    scriptHash: string,
+    outRef: string,
+  ): AssetName.AssetName {
+    const credential = poolUtxo.address.paymentCredential;
+    if (
+      credential._tag !== "ScriptHash" ||
+      toScriptHashHex(credential) !== scriptHash
+    ) {
+      throw new Error(
+        `Pool input ${outRef} is not locked by the pool script ${scriptHash}.`,
+      );
+    }
+
+    const validityNft = flatten(poolUtxo.assets).find(
+      ([policyId, , quantity]) =>
+        quantity === 1n && PolicyId.toHex(policyId) === scriptHash,
+    );
+    if (!validityNft) {
+      throw new Error(
+        `Pool input ${outRef} carries no validity NFT of policy ${scriptHash}.`,
+      );
+    }
+    return validityNft[1];
+  }
+
+  /**
+   * The redeemer tells the validator which output re-creates each pool, and that
+   * index is decided before the transaction is assembled. This re-reads the built
+   * transaction to confirm each pool's validity NFT really did land where its
+   * redeemer says, rather than trusting the ordering to hold.
+   */
+  private assertPoolOutputsAt(
+    outputs: readonly TransactionOutput.TransactionOutput[],
+    pools: { validityNft: AssetName.AssetName; outRef: string }[],
+    outputIndices: number[],
+    scriptHash: string,
+  ): void {
+    pools.forEach((pool, index) => {
+      const outputIndex = outputIndices[index];
+      if (outputIndex < 0) return;
+
+      const output = outputs[outputIndex];
+      if (!output || !holdsNft(output.amount, scriptHash, pool.validityNft)) {
+        throw new Error(
+          `Pool ${pool.outRef} is declared at output ${outputIndex} of the built transaction, but that output does not hold its validity NFT.`,
+        );
+      }
+    });
+  }
+
+  /**
+   * The epoch decides what this swap writes into the pool datum and whether it
+   * owes a staking claim, but no provider method reports the chain tip, so the
+   * fallback is this machine's clock. A caller that can read the tip should say
+   * so rather than let a skewed clock pick the epoch near a boundary.
+   */
+  private resolveEpoch(supplied: number | undefined, networkId: number): number {
+    if (supplied === undefined) return getEpoch(Date.now(), networkId);
+
+    if (!Number.isSafeInteger(supplied) || supplied < 0) {
+      throw new Error(
+        `currentEpoch must be a non-negative whole number, got ${supplied}.`,
+      );
+    }
+    return supplied;
+  }
+
+  /** Below its minimum the validator moves the pool by that minimum instead, taking more from the wallet than the caller offered. */
+  private assertMeetsPoolMinimum(
+    datum: PoolDatum,
+    deltaAmount: bigint,
+    outRef: string,
+  ): void {
+    const offered = deltaAmount > 0n ? deltaAmount : -deltaAmount;
+    const minimum = deltaAmount > 0n ? datum.minXChange : datum.minYChange;
+    if (offered < minimum) {
+      throw new Error(
+        `Pool ${outRef} moves at least ${minimum} at a time, but the request offers ${offered}.`,
+      );
+    }
+  }
+
+  /** An omitted floor leaves the swap with no price protection at all, which is an oversight rather than a choice; `0n` says it on purpose. */
+  private assertSlippageFloors(
+    pools: readonly { poolOutRef: string; minOutChangeAmount?: bigint }[],
+  ): void {
+    pools.forEach((pool, index) => {
+      if (pool.minOutChangeAmount === undefined) {
+        throw new Error(
+          `Pool ${index} (${pool.poolOutRef}) has no minOutChangeAmount. Set the least output you accept, or 0n to swap at any price.`,
+        );
+      }
+      if (pool.minOutChangeAmount < 0n) {
+        throw new Error(
+          `Pool ${index} (${pool.poolOutRef}) has a negative minOutChangeAmount.`,
+        );
+      }
+    });
+  }
+
+  /** A zero-delta pool is dropped from the swap results, desyncing the pool indices the redeemer is built from. */
+  private assertNonZeroDeltas(
+    pools: readonly { poolOutRef: string; deltaAmount: bigint }[],
+  ): void {
+    pools.forEach((pool, index) => {
+      if (pool.deltaAmount === 0n) {
+        throw new Error(
+          `Pool ${index} (${pool.poolOutRef}) has deltaAmount 0. Remove it from the request instead.`,
+        );
+      }
+    });
+  }
+
   /**
    * Helper function to build delta assets for pool updates
    */
@@ -547,11 +780,11 @@ class DanogoClmm {
   private async getRewardAmount(
     client: SigningClient,
     networkId: number,
-    stakingRefUtxo: UTxO.UTxO,
+    stakingCredential: ScriptHash.ScriptHash,
   ): Promise<bigint> {
     const stakingAccount = new RewardAccount.RewardAccount({
       networkId,
-      stakeCredential: fromScript(stakingRefUtxo.scriptRef!),
+      stakeCredential: stakingCredential,
     });
     const stakingRewardAddress = RewardAccount.toBech32(
       stakingAccount,
@@ -559,6 +792,45 @@ class DanogoClmm {
     const rewardAmount = (await client.getDelegation(stakingRewardAddress)).rewards;
 
     return rewardAmount;
+  }
+
+  /**
+   * The first transaction to touch a pool in a new epoch must carry its staking
+   * withdrawal, so this returns the credential to withdraw from, or null when no
+   * claim is due. Taking it from the pool's own address rather than from a
+   * caller-supplied reference keeps it tied to the pool being spent.
+   */
+  private resolveEpochClaim(
+    poolUtxo: UTxO.UTxO,
+    datum: PoolDatum,
+    currentEpoch: number,
+  ): ScriptHash.ScriptHash | null {
+    if (datum.lastWithdrawEpoch >= currentEpoch) return null;
+
+    const stakingCredential = poolUtxo.address.stakingCredential;
+    if (!stakingCredential || stakingCredential._tag !== "ScriptHash") {
+      return null;
+    }
+    return stakingCredential;
+  }
+
+  private assertStakingRefMatches(
+    stakingRefUtxo: UTxO.UTxO,
+    stakingCredential: ScriptHash.ScriptHash,
+    outRef: string,
+  ): void {
+    if (!stakingRefUtxo.scriptRef) {
+      throw new Error(
+        `Staking reference for pool ${outRef} carries no script.`,
+      );
+    }
+    const referenced = toScriptHashHex(fromScript(stakingRefUtxo.scriptRef));
+    const expected = toScriptHashHex(stakingCredential);
+    if (referenced !== expected) {
+      throw new Error(
+        `Staking reference for pool ${outRef} holds script ${referenced}, but the pool delegates to ${expected}.`,
+      );
+    }
   }
 
   /**

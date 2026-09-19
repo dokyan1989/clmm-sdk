@@ -189,7 +189,7 @@ const swap = (
 
 describe("current epoch", () => {
   it("writes the supplied epoch into the pool datum", async () => {
-    const supplied = CLOCK_EPOCH + 5;
+    const supplied = CLOCK_EPOCH + 2;
     const { datums, run } = swap(
       poolUtxo(CLOCK_EPOCH - 1),
       supplied,
@@ -228,5 +228,14 @@ describe("current epoch", () => {
         /currentEpoch must be a non-negative whole number/,
       );
     }
+  });
+
+  it("refuses an epoch far from this machine's clock, which would permanently block a shared pool's future staking claims", async () => {
+    await expect(
+      swap(poolUtxo(CLOCK_EPOCH - 1), CLOCK_EPOCH + 100_000).run,
+    ).rejects.toThrow(/currentEpoch .* is too far from/);
+    await expect(
+      swap(poolUtxo(CLOCK_EPOCH - 1), Number.MAX_SAFE_INTEGER).run,
+    ).rejects.toThrow(/currentEpoch .* is too far from/);
   });
 });

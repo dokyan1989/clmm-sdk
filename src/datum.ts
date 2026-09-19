@@ -36,17 +36,45 @@ const asInteger = (field: unknown, name: string): bigint => {
   return BigInt(field);
 };
 
+/** As asInteger, but also rejects a value above max (a structural ceiling, e.g. basis points). */
+const asBoundedInteger = (field: unknown, name: string, max: bigint): bigint => {
+  const value = asInteger(field, name);
+  if (value < 0n || value > max) {
+    throw new Error(`${name} must not be negative or exceed ${max}, got ${value}`);
+  }
+  return value;
+};
+
+/** As asInteger, but also rejects a negative value. */
+const asNonNegativeInteger = (field: unknown, name: string): bigint => {
+  const value = asInteger(field, name);
+  if (value < 0n) {
+    throw new Error(`${name} must not be negative, got ${value}`);
+  }
+  return value;
+};
+
+const EMPTY_BYTES = new Uint8Array(0);
+
+/**
+ * [policyId, assetName] bytes for a token unit. ADA_UNIT ("lovelace") is not
+ * itself hex and must be special-cased to the empty AssetClass, rather than
+ * relying on Buffer.from('hex') silently truncating it at the first invalid
+ * nibble — Node happens to stop right at position 0, but that's an accident
+ * of this one hex decoder, not something the encoding should depend on.
+ */
+const encodeAssetClass = (unit: string): [Uint8Array, Uint8Array] => {
+  if (unit === ADA_UNIT) return [EMPTY_BYTES, EMPTY_BYTES];
+  return [
+    new Uint8Array(Buffer.from(unit.slice(0, 56), 'hex')),
+    new Uint8Array(Buffer.from(unit.slice(57), 'hex')), // skip the "." separator at index 56
+  ];
+};
+
 /** @internal */
 export const transformPoolDatum = (datum: PoolDatum): InlineDatum => {
-  const tokenXData = [
-    new Uint8Array(Buffer.from(datum.tokenX.slice(0, 56), 'hex')),
-    new Uint8Array(Buffer.from(datum.tokenX.slice(57), 'hex')), // skip the "." separator at index 56
-  ];
-
-  const tokenYData = [
-    new Uint8Array(Buffer.from(datum.tokenY.slice(0, 56), 'hex')),
-    new Uint8Array(Buffer.from(datum.tokenY.slice(57), 'hex')), // skip the "." separator at index 56
-  ];
+  const tokenXData = encodeAssetClass(datum.tokenX);
+  const tokenYData = encodeAssetClass(datum.tokenY);
 
   const sqrtLowerPriceData = Data.constr(0n, [
     datum.sqrtLowerPriceNum,
@@ -179,16 +207,20 @@ export const parseDatum = (datum: string | Data.Data): PoolDatum => {
   return {
     tokenX: parseAsset(fields[0]),
     tokenY: parseAsset(fields[1]),
-    lpFeeRate: Number(asInteger(fields[2], "Pool datum lpFeeRate")),
-    platformFeeX: asInteger(fields[3], "Pool datum platformFeeX"),
-    platformFeeY: asInteger(fields[4], "Pool datum platformFeeY"),
+    // lpFeeRate is basis points of the trade; above 10000 it would make
+    // offFee negative in getPoolChange, corrupting the swap math.
+    lpFeeRate: Number(
+      asBoundedInteger(fields[2], "Pool datum lpFeeRate", BASIS_POINTS),
+    ),
+    platformFeeX: asNonNegativeInteger(fields[3], "Pool datum platformFeeX"),
+    platformFeeY: asNonNegativeInteger(fields[4], "Pool datum platformFeeY"),
     totalSwapFee: asInteger(fields[5], "Pool datum totalSwapFee"),
     sqrtLowerPriceNum: sqrtLowerPrice.num,
     sqrtLowerPriceDen: sqrtLowerPrice.den,
     sqrtUpperPriceNum: sqrtUpperPrice.num,
     sqrtUpperPriceDen: sqrtUpperPrice.den,
-    minXChange: asInteger(fields[8], "Pool datum minXChange"),
-    minYChange: asInteger(fields[9], "Pool datum minYChange"),
+    minXChange: asNonNegativeInteger(fields[8], "Pool datum minXChange"),
+    minYChange: asNonNegativeInteger(fields[9], "Pool datum minYChange"),
     circulatingLPToken: asInteger(fields[10], "Pool datum circulatingLPToken"),
     lastWithdrawEpoch: Number(asInteger(fields[11], "Pool datum lastWithdrawEpoch")),
   };

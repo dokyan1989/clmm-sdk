@@ -98,4 +98,38 @@ describe("pool datum", () => {
       /sqrtLowerPrice numerator must be an integer/,
     );
   });
+
+  it("rejects an lpFeeRate outside 0..10000 basis points", () => {
+    const tooHigh = fields();
+    tooHigh[2] = 10_001n;
+    expect(() => parseDatum(Data.constr(0n, tooHigh))).toThrow(
+      /lpFeeRate must not be negative or exceed 10000/,
+    );
+
+    const negative = fields();
+    negative[2] = -1n;
+    expect(() => parseDatum(Data.constr(0n, negative))).toThrow(
+      /lpFeeRate must not be negative or exceed 10000/,
+    );
+  });
+
+  it("rejects a negative platformFeeX/platformFeeY", () => {
+    for (const index of [3, 4] as const) {
+      const negative = fields();
+      negative[index] = -1n;
+      expect(() => parseDatum(Data.constr(0n, negative))).toThrow(
+        /platformFee[XY] must not be negative/,
+      );
+    }
+  });
+
+  it("rejects a negative minXChange/minYChange", () => {
+    for (const index of [8, 9] as const) {
+      const negative = fields();
+      negative[index] = -1n;
+      expect(() => parseDatum(Data.constr(0n, negative))).toThrow(
+        /min[XY]Change must not be negative/,
+      );
+    }
+  });
 });

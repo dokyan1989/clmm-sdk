@@ -1,6 +1,7 @@
 import {
   AssetName,
   Data,
+  DatumHash,
   PolicyId,
   RewardAccount,
   RewardAddress,
@@ -10,6 +11,8 @@ import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
 import * as TxOut from "@evolution-sdk/evolution/TxOut";
 import { SigningTransactionBuilder } from "@evolution-sdk/evolution/sdk/builders/TransactionBuilder";
 import * as ScriptHash from "@evolution-sdk/evolution/ScriptHash";
+import { getPaymentCredential } from "@evolution-sdk/evolution/Address";
+import { toHex as toCredentialHex } from "@evolution-sdk/evolution/Credential";
 import {
   fromScript,
   toHex as toScriptHashHex,
@@ -358,6 +361,12 @@ class DanogoClmm {
     // Initialize transaction builder
     let tx: SigningTransactionBuilder = client.newTx();
 
+    // Cardano's withdrawals are keyed by reward account, so two pools sharing
+    // a staking script distinct from the pool script would collide here —
+    // one entry silently overwriting the other while both pools' outputs
+    // still credit themselves the reward, double-counting it.
+    const queuedStakingCredentials = new Set<string>();
+
     // Add reference inputs. Pools sharing a staking script would otherwise be
     // counted twice here while the transaction holds one, shifting every index
     // the redeemer derives from this list.
@@ -457,6 +466,14 @@ class DanogoClmm {
           toScriptHashHex(poolScriptCredential);
 
         if (!sharesPoolScriptAccount) {
+          const stakingHex = toScriptHashHex(stakingCredential);
+          if (queuedStakingCredentials.has(stakingHex)) {
+            throw new Error(
+              `Pool ${pool.outRef} shares its staking credential with another pool in this swap; withdrawing the same reward account twice would double-count its ${rewardAmount} lovelace reward.`,
+            );
+          }
+          queuedStakingCredentials.add(stakingHex);
+
           tx = tx.withdraw({
             stakeCredential: stakingCredential,
             amount: rewardAmount,
@@ -543,6 +560,16 @@ class DanogoClmm {
     const outputs = tx.outputs ?? [];
 
     outputs.forEach((utxo, index) => {
+      // A validity NFT, once minted, is a freely transferable token — anyone
+      // could send one to an address they control, paired with an arbitrary
+      // datum. Require it to actually sit at the pool script's own address,
+      // matching the check derivePoolNft makes for a live UTxO.
+      const credential = getPaymentCredential(utxo.address);
+      const isPoolScriptAddress =
+        credential?._tag === "ScriptHash" &&
+        toCredentialHex(credential) === scriptHash;
+      if (!isPoolScriptAddress) return;
+
       const val = utxo.value;
       const policyAssets = val[scriptHash];
 
@@ -689,11 +716,23 @@ class DanogoClmm {
    * so rather than let a skewed clock pick the epoch near a boundary.
    */
   private resolveEpoch(supplied: number | undefined, networkId: number): number {
-    if (supplied === undefined) return getEpoch(Date.now(), networkId);
+    const clockEpoch = getEpoch(Date.now(), networkId);
+    if (supplied === undefined) return clockEpoch;
 
     if (!Number.isSafeInteger(supplied) || supplied < 0) {
       throw new Error(
         `currentEpoch must be a non-negative whole number, got ${supplied}.`,
+      );
+    }
+    // A caller reading the real chain tip may legitimately differ from this
+    // machine's clock by a little, but nothing legitimate is far off. This
+    // epoch gets written into a pool's shared, persistent lastWithdrawEpoch —
+    // an unbounded value could push it far into the future and permanently
+    // block every future staking claim on that pool.
+    const EPOCH_TOLERANCE = 2;
+    if (Math.abs(supplied - clockEpoch) > EPOCH_TOLERANCE) {
+      throw new Error(
+        `currentEpoch ${supplied} is too far from this machine's clock estimate of ${clockEpoch} (tolerance ${EPOCH_TOLERANCE}).`,
       );
     }
     return supplied;
@@ -862,7 +901,18 @@ class DanogoClmm {
     if (utxo.datumOption._tag === "InlineDatum") {
       return utxo.datumOption.data;
     }
-    return client.getDatum(utxo.datumOption);
+    // evolution-sdk's own providers hand back whatever CBOR they resolved for
+    // this hash without re-hashing it, so a compromised or buggy provider
+    // could substitute different data. Verify it here instead of trusting it.
+    const data = await client.getDatum(utxo.datumOption);
+    const resolvedHash = DatumHash.toHex(Data.toDatumHash(data));
+    const expectedHash = DatumHash.toHex(utxo.datumOption);
+    if (resolvedHash !== expectedHash) {
+      throw new Error(
+        `${description} datum hash mismatch: provider returned data hashing to ${resolvedHash}, expected ${expectedHash}.`,
+      );
+    }
+    return data;
   }
 
   private async getUtxoOrThrow(

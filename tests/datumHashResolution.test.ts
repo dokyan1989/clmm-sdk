@@ -27,10 +27,6 @@ const TOKEN_Y =
   "fe7c786ab321f41c654ef6c1af7b3250a613c24e4213e0425a7ae456.55534441";
 const NFT_NAME = "aabbccdd";
 
-/** Real Danogo pool and protocol-config UTxOs carry a datum hash, not inline data — this is that shape. */
-const POOL_DATUM_HASH = DatumHash.fromHex("11".repeat(32));
-const CONFIG_DATUM_HASH = DatumHash.fromHex("22".repeat(32));
-
 const poolDatum: PoolDatum = {
   tokenX: ADA_UNIT,
   tokenY: TOKEN_Y,
@@ -49,6 +45,9 @@ const poolDatum: PoolDatum = {
 };
 const POOL_DATUM_DATA = transformPoolDatum(poolDatum).data;
 const CONFIG_DATUM_DATA = Data.constr(0n, [3_000n, 2_000_000n]);
+/** Real Danogo pool and protocol-config UTxOs carry a datum hash, not inline data — this is that shape. */
+const POOL_DATUM_HASH = Data.toDatumHash(POOL_DATUM_DATA);
+const CONFIG_DATUM_HASH = Data.toDatumHash(CONFIG_DATUM_DATA);
 
 const poolUtxoWithHashDatum = (): UTxO.UTxO => {
   const nft = getPolicyIdAssetNameFromUnit(

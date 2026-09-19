@@ -35,18 +35,17 @@ describe("ADA's AssetClass encoding", () => {
     // would throw instead. Simulate that here: encoding ADA_UNIT must not go
     // through Buffer.from('hex') on "lovelace" at all.
     const realFrom = Buffer.from.bind(Buffer);
-    const spy = vi
-      .spyOn(Buffer, "from")
-      .mockImplementation((input: unknown, encoding?: unknown) => {
-        if (
-          encoding === "hex" &&
-          typeof input === "string" &&
-          !/^[0-9a-fA-F]*$/.test(input)
-        ) {
-          throw new Error("strict hex decoder: invalid hex string");
-        }
-        return (realFrom as (...args: unknown[]) => Buffer)(input, encoding);
-      });
+    const strictFrom = ((input: unknown, encoding?: unknown) => {
+      if (
+        encoding === "hex" &&
+        typeof input === "string" &&
+        !/^[0-9a-fA-F]*$/.test(input)
+      ) {
+        throw new Error("strict hex decoder: invalid hex string");
+      }
+      return (realFrom as (...args: unknown[]) => Buffer)(input, encoding);
+    }) as typeof Buffer.from;
+    const spy = vi.spyOn(Buffer, "from").mockImplementation(strictFrom);
 
     try {
       expect(() => transformPoolDatum(adaPoolDatum)).not.toThrow();

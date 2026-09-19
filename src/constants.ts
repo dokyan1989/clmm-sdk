@@ -1,6 +1,9 @@
 export const ADA_UNIT = "lovelace";
 
-export const EPOCH_LENGTH_MAINNET = 432_000_000;
+// Length, in ms, of the "epoch" this SDK writes to a pool's lastWithdrawEpoch
+// and uses to decide whether a staking claim is due — see getEpoch. This is
+// Danogo's own reward-epoch cadence, not Cardano's chain epoch.
+export const EPOCH_LENGTH_MAINNET = 432_000_000; // 5 days
 export const POOL_SCRIPT_OUT_REF_MAINNET =
   "64d111b957e7d7848ffdde5149aa77fa4090a7fa1ad0ac108067900614848501#0";
 export const POOL_SCRIPT_HASH_MAINNET =
@@ -8,7 +11,7 @@ export const POOL_SCRIPT_HASH_MAINNET =
 export const PROTOCOL_CONFIG_OUT_REF_MAINNET =
   "2cafd7c92f7093e5229af274be83dea660b0590b4174bbed79ba662b44fbd1ee#0";
 
-export const EPOCH_LENGTH_PREPROD = 1_800_000; // set shorter epoch length for testing
+export const EPOCH_LENGTH_PREPROD = 1_800_000; // 30 min
 export const POOL_SCRIPT_OUT_REF_PREPROD =
   "2e19cca74e3badcab26aef7574aa1885ba97228a254ca227ba2f79f2b75fd136#0";
 export const POOL_SCRIPT_HASH_PREPROD =

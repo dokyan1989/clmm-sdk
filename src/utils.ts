@@ -5,6 +5,8 @@ import { ADA_UNIT, EPOCH_LENGTH_MAINNET, EPOCH_LENGTH_PREPROD } from "./constant
 /** @internal */
 export const getEpoch = (t: number, network: NetworkId.NetworkId): number => {
   let epochLength = EPOCH_LENGTH_MAINNET;
+  // A known (timestamp ms, epoch) reference point; epoch = boundary epoch +
+  // elapsed epochs since then.
   const epochBoundary = 1647899091000;
   const epochBoundaryAsEpoch = 328;
   if (network !== 1) {
@@ -14,7 +16,7 @@ export const getEpoch = (t: number, network: NetworkId.NetworkId): number => {
   return Math.floor((t - epochBoundary) / epochLength) + epochBoundaryAsEpoch;
 };
 
-/** @internal */
+/** Returns the possibly-shrunk deltaAmount (see getPoolChange) alongside the swap's output and fee. @internal */
 export function calculateConcentratedPoolSwap(
   tokenAAmount: bigint,
   tokenBAmount: bigint,
@@ -23,7 +25,6 @@ export function calculateConcentratedPoolSwap(
   rewardAmount: bigint = 0n,
   platformFeeRate: bigint
 ): { deltaAmount: bigint; outputAmount: bigint; platformFee: bigint } {
-  // Constants
   const poolInAmount = deltaAmount < 0n ? -deltaAmount : deltaAmount;
   const excludedADA: bigint = datum.tokenX === ADA_UNIT ? 3_000_000n + BigInt(datum.totalSwapFee) : 0n;
   const activeReserveX =

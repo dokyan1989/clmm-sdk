@@ -40,13 +40,7 @@ export function getPolicyIdAssetNameFromUnit(unit: string): TokenInfo {
   return { policyId, assetName, unit };
 }
 
-/** @internal */
-/**
- * Builds an array of MultiAsset objects from a Ogmios Value object.
- * Not use for build tx
- * @param assets 
- * @returns 
- */
+/** Builds MultiAsset entries from an Ogmios Value object; for reading pool data, not for building transactions. @internal */
 export const buildMultiAssetsFromAssets = (assets: Value): MultiAsset[] => {
   if (!assets || Object.keys(assets).length === 0) {
     return [];

@@ -2,16 +2,8 @@ import { Data, UTxO } from "@evolution-sdk/evolution";
 import type { IndexedInput } from "@evolution-sdk/evolution/sdk/builders/RedeemerBuilder";
 import { RedeemerArg } from "@evolution-sdk/evolution/sdk/builders/RedeemerBuilder";
 
-/**
- * Converts a BigInt to a big-endian byte array (Uint8Array) of a specific length.
- * @param n The BigInt to convert.
- * @param length The desired length of the output byte array.
- * @returns A Uint8Array representing the BigInt, padded with leading zeros if necessary.
- */
-/** @internal */
+/** Big-endian, zero-padded to `length` bytes. Negative n (only ever a deltaAmount) is encoded as its two's-complement over 2^256. @internal */
 export function bigintToBytesPadded(n: bigint, length: number): Uint8Array {
-  // if n is negative, n only can be deltaAmount
-  // add 2^256 (32 bytes) to get positive number represent deltaAmount
   const unSignNum = n >= 0n ? n : n + (1n << 256n);
 
   let hex = unSignNum.toString(16);

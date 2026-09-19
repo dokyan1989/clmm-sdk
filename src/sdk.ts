@@ -64,6 +64,7 @@ class DanogoClmm {
    * @param request The quote request object containing pool references and the swap amount.
    *                - `pools`: Array of pool objects with poolOutRef, deltaAmount, and optional stakingOutRef
    *                - `protocolConfigOutRef`: Reference to the protocol configuration UTxO
+   *                - `currentEpoch`: Optional; defaults to this machine's clock (see resolveEpoch)
    * @returns A promise that resolves to a `bigint` representing the estimated total output token amount.
    *
    * @example
@@ -182,6 +183,7 @@ class DanogoClmm {
    *                - `pools`: Array of pool objects with poolOutRef, deltaAmount, minOutChangeAmount, and optional stakingOutRef
    *                - `minOutChangeAmount`: Minimum acceptable output for that pool (slippage protection); `0n` swaps at any price
    *                - `protocolConfigOutRef`: Reference to the protocol configuration UTxO
+   *                - `currentEpoch`: Optional; defaults to this machine's clock (see resolveEpoch)
    * @returns A promise that resolves to the transaction hash.
    *
    * @example
@@ -743,9 +745,7 @@ class DanogoClmm {
     });
   }
 
-  /**
-   * Helper function to build delta assets for pool updates
-   */
+  /** Asset delta for the pool's new output: +amountIn (plus swapFee) of tokenIn, -amountOut of tokenOut. */
   private buildDeltaAssets(
     tokenIn: { unit: string; policyId?: any; assetName?: any },
     tokenOut: { unit: string; policyId?: any; assetName?: any },
@@ -784,9 +784,7 @@ class DanogoClmm {
     return deltaAssets;
   }
 
-  /**
-   * Helper function to handle staking rewards for ADA pools
-   */
+  /** Outstanding staking reward for a pool's stake account, in lovelace. */
   private async getRewardAmount(
     client: SigningClient,
     networkId: number,
@@ -799,6 +797,8 @@ class DanogoClmm {
     const stakingRewardAddress = RewardAccount.toBech32(
       stakingAccount,
     ) as RewardAddress.RewardAddress;
+    // On Kupmios, requires an Ogmios new enough for the array-shaped
+    // queryLedgerState/rewardAccountSummaries response — see README.
     const rewardAmount = (await client.getDelegation(stakingRewardAddress)).rewards;
 
     return rewardAmount;
@@ -865,9 +865,6 @@ class DanogoClmm {
     return client.getDatum(utxo.datumOption);
   }
 
-  /**
-   * Helper function to get UTxO or throw error if not found
-   */
   private async getUtxoOrThrow(
     client: SigningClient,
     outRefString: string,

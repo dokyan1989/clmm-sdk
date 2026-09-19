@@ -27,10 +27,13 @@ export interface ConcentratedPool {
 
 export interface SwapRequest {
   pools: {
+    /** "txHash#index" of the pool's own UTxO. */
     poolOutRef: string;
+    /** Signed input amount: positive sells tokenX (buys tokenY), negative sells tokenY (buys tokenX). */
     deltaAmount: bigint;
     /** Minimum output accepted from this pool. Use `0n` to swap at any price. */
     minOutChangeAmount: bigint;
+    /** Reference UTxO for the pool's own staking script; required only if it still owes this epoch's reward claim. */
     stakingOutRef?: string;
   }[];
   protocolConfigOutRef?: string;
@@ -45,8 +48,11 @@ export interface SwapRequest {
 
 export interface QuoteSwapRequest {
   pools: {
+    /** "txHash#index" of the pool's own UTxO. */
     poolOutRef: string;
+    /** Signed input amount: positive sells tokenX (buys tokenY), negative sells tokenY (buys tokenX). */
     deltaAmount: bigint;
+    /** Reference UTxO for the pool's own staking script; required only if it still owes this epoch's reward claim. */
     stakingOutRef?: string;
   }[];
   protocolConfigOutRef?: string;

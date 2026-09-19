@@ -38,31 +38,26 @@ const asInteger = (field: unknown, name: string): bigint => {
 
 /** @internal */
 export const transformPoolDatum = (datum: PoolDatum): InlineDatum => {
-  // Create arrays for tokenX and tokenY
   const tokenXData = [
     new Uint8Array(Buffer.from(datum.tokenX.slice(0, 56), 'hex')),
-    new Uint8Array(Buffer.from(datum.tokenX.slice(57), 'hex')), // ignore dot separator
+    new Uint8Array(Buffer.from(datum.tokenX.slice(57), 'hex')), // skip the "." separator at index 56
   ];
 
-  // Create arrays for tokenY
   const tokenYData = [
     new Uint8Array(Buffer.from(datum.tokenY.slice(0, 56), 'hex')),
-    new Uint8Array(Buffer.from(datum.tokenY.slice(57), 'hex')), // ignore dot separator
+    new Uint8Array(Buffer.from(datum.tokenY.slice(57), 'hex')), // skip the "." separator at index 56
   ];
 
-  // Create PlutusData for sqrtLowerPrice ratio
   const sqrtLowerPriceData = Data.constr(0n, [
     datum.sqrtLowerPriceNum,
     datum.sqrtLowerPriceDen,
   ]);
 
-  // Create PlutusData for sqrtUpperPrice ratio
   const sqrtUpperPriceData = Data.constr(0n, [
     datum.sqrtUpperPriceNum,
     datum.sqrtUpperPriceDen,
   ]);
 
-  // Create the main pool datum as a Constr with all fields
   const poolDataumData = Data.constr(0n, [
     tokenXData,
     tokenYData,

@@ -18,6 +18,7 @@ import {
   POOL_SCRIPT_HASH_MAINNET,
   POOL_SCRIPT_OUT_REF_MAINNET,
   PROTOCOL_CONFIG_OUT_REF_MAINNET,
+  PROTOCOL_CONFIG_SCRIPT_HASH_MAINNET,
 } from "../src/constants.js";
 
 // Same fixture-hash workaround as withdrawalCollision.test.ts: the pool
@@ -115,7 +116,7 @@ const configUtxo = (): UTxO.UTxO =>
     index: 0n,
     address: new Address.Address({
       networkId: 1,
-      paymentCredential: ScriptHash.fromHex(POOL_SCRIPT_HASH_MAINNET),
+      paymentCredential: ScriptHash.fromHex(PROTOCOL_CONFIG_SCRIPT_HASH_MAINNET),
     }),
     assets: Assets.fromLovelace(5_000_000n),
     datumOption: new InlineDatum({ data: Data.constr(0n, [3_000n, 2_000_000n]) }),

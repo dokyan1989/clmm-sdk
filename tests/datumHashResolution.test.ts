@@ -16,6 +16,7 @@ import {
   ADA_UNIT,
   POOL_SCRIPT_HASH_MAINNET,
   PROTOCOL_CONFIG_OUT_REF_MAINNET,
+  PROTOCOL_CONFIG_SCRIPT_HASH_MAINNET,
 } from "../src/constants.js";
 import { transformPoolDatum, type PoolDatum } from "../src/datum.js";
 import { getPolicyIdAssetNameFromUnit } from "../src/multiAssets.js";
@@ -45,7 +46,7 @@ const poolDatum: PoolDatum = {
 };
 const POOL_DATUM_DATA = transformPoolDatum(poolDatum).data;
 const CONFIG_DATUM_DATA = Data.constr(0n, [3_000n, 2_000_000n]);
-/** Real Danogo pool and protocol-config UTxOs carry a datum hash, not inline data — this is that shape. */
+/** A hash-referenced datum is legal Cardano even though real Danogo UTxOs observed so far are inline — this is that shape. */
 const POOL_DATUM_HASH = Data.toDatumHash(POOL_DATUM_DATA);
 const CONFIG_DATUM_HASH = Data.toDatumHash(CONFIG_DATUM_DATA);
 
@@ -75,7 +76,7 @@ const configUtxoWithHashDatum = (): UTxO.UTxO =>
     index: 0n,
     address: new Address.Address({
       networkId: 1,
-      paymentCredential: ScriptHash.fromHex(POOL_SCRIPT_HASH_MAINNET),
+      paymentCredential: ScriptHash.fromHex(PROTOCOL_CONFIG_SCRIPT_HASH_MAINNET),
     }),
     assets: Assets.fromLovelace(5_000_000n),
     datumOption: CONFIG_DATUM_HASH,

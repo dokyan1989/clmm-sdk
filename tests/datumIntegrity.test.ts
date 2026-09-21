@@ -16,6 +16,7 @@ import {
   ADA_UNIT,
   POOL_SCRIPT_HASH_MAINNET,
   PROTOCOL_CONFIG_OUT_REF_MAINNET,
+  PROTOCOL_CONFIG_SCRIPT_HASH_MAINNET,
 } from "../src/constants.js";
 import { transformPoolDatum, type PoolDatum } from "../src/datum.js";
 import { getPolicyIdAssetNameFromUnit } from "../src/multiAssets.js";
@@ -59,7 +60,7 @@ const configUtxo = (): UTxO.UTxO =>
     index: 0n,
     address: new Address.Address({
       networkId: 1,
-      paymentCredential: ScriptHash.fromHex(POOL_SCRIPT_HASH_MAINNET),
+      paymentCredential: ScriptHash.fromHex(PROTOCOL_CONFIG_SCRIPT_HASH_MAINNET),
     }),
     assets: Assets.fromLovelace(5_000_000n),
     datumOption: new InlineDatum({

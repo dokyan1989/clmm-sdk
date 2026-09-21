@@ -18,6 +18,7 @@ import {
   POOL_SCRIPT_HASH_MAINNET,
   POOL_SCRIPT_OUT_REF_MAINNET,
   PROTOCOL_CONFIG_OUT_REF_MAINNET,
+  PROTOCOL_CONFIG_SCRIPT_HASH_MAINNET,
 } from "../src/constants.js";
 
 // This SDK now verifies the pool-script UTxO's real hash against
@@ -79,6 +80,7 @@ const utxoAt = (
     datumOption?: InlineDatum;
     scriptRef?: PlutusV3.PlutusV3;
     stakingCredential?: ScriptHash.ScriptHash;
+    paymentCredentialHash?: string;
   } = {},
 ) =>
   new UTxO.UTxO({
@@ -86,7 +88,9 @@ const utxoAt = (
     index: 0n,
     address: new Address.Address({
       networkId: 1,
-      paymentCredential: ScriptHash.fromHex(POOL_SCRIPT_HASH_MAINNET),
+      paymentCredential: ScriptHash.fromHex(
+        extras.paymentCredentialHash ?? POOL_SCRIPT_HASH_MAINNET,
+      ),
       stakingCredential: extras.stakingCredential,
     }),
     assets,
@@ -151,6 +155,7 @@ const recordingClient = (pool: UTxO.UTxO) => {
             datumOption: new InlineDatum({
               data: Data.constr(0n, [3_000n, 2_000_000n]),
             }),
+            paymentCredentialHash: PROTOCOL_CONFIG_SCRIPT_HASH_MAINNET,
           }),
         ];
       }

@@ -66,7 +66,6 @@ class DanogoClmm {
    * @param client An initialized SigningClient instance used to query the blockchain.
    * @param request The quote request object containing pool references and the swap amount.
    *                - `pools`: Array of pool objects with poolOutRef, deltaAmount, and optional stakingOutRef
-   *                - `protocolConfigOutRef`: Reference to the protocol configuration UTxO
    *                - `currentEpoch`: Optional; defaults to this machine's clock (see resolveEpoch)
    * @returns A promise that resolves to a `bigint` representing the estimated total output token amount.
    *
@@ -84,8 +83,7 @@ class DanogoClmm {
    *       deltaAmount: 500_000n, // 0.5 ADA to pool 2
    *       stakingOutRef: staking2OutRef
    *     }
-   *   ],
-   *   protocolConfigOutRef: protocolConfigRef
+   *   ]
    * });
    * ```
    */
@@ -116,11 +114,15 @@ class DanogoClmm {
       ),
     );
 
-    const protocolConfigOutRef =
-      request.protocolConfigOutRef ?? config.protocolScriptOutRef;
+    const protocolConfigOutRef = config.protocolScriptOutRef;
 
     // Fetch protocol config
     const protocolConfigUtxo = await this.getUtxoOrThrow(client, protocolConfigOutRef, "Protocol config");
+    this.assertProtocolConfigMatches(
+      protocolConfigUtxo,
+      config.protocolConfigScriptHash,
+      protocolConfigOutRef,
+    );
     const protocolConfigDatum = parseProtocolConfigDatum(
       await this.resolveDatum(client, protocolConfigUtxo, "Protocol config UTxO"),
     );
@@ -204,7 +206,6 @@ class DanogoClmm {
    * @param request The swap request object containing pool references, swap amount, and minimum output.
    *                - `pools`: Array of pool objects with poolOutRef, deltaAmount, minOutChangeAmount, and optional stakingOutRef
    *                - `minOutChangeAmount`: Minimum acceptable output for that pool (slippage protection); `0n` swaps at any price
-   *                - `protocolConfigOutRef`: Reference to the protocol configuration UTxO
    *                - `currentEpoch`: Optional; defaults to this machine's clock (see resolveEpoch)
    * @returns A promise that resolves to the transaction hash.
    *
@@ -224,8 +225,7 @@ class DanogoClmm {
    *       minOutChangeAmount: 900_000n, // Minimum 0.9 tokens out of pool 2
    *       stakingOutRef: staking2OutRef
    *     }
-   *   ],
-   *   protocolConfigOutRef: protocolConfigRef
+   *   ]
    * });
    * ```
    */
@@ -258,8 +258,7 @@ class DanogoClmm {
     );
 
     const poolScriptOutRef = config.poolScriptOutRef;
-    const protocolConfigOutRef =
-      request.protocolConfigOutRef ?? config.protocolScriptOutRef;
+    const protocolConfigOutRef = config.protocolScriptOutRef;
 
     const poolScriptUtxo = await this.getUtxoOrThrow(client, poolScriptOutRef, "Pool script");
     const poolScriptCredential = this.assertPoolScriptMatches(
@@ -270,6 +269,11 @@ class DanogoClmm {
 
     // Fetch protocol config
     const protocolConfigUtxo = await this.getUtxoOrThrow(client, protocolConfigOutRef, "Protocol config");
+    this.assertProtocolConfigMatches(
+      protocolConfigUtxo,
+      config.protocolConfigScriptHash,
+      protocolConfigOutRef,
+    );
     const protocolConfigDatum = parseProtocolConfigDatum(
       await this.resolveDatum(client, protocolConfigUtxo, "Protocol config UTxO"),
     );
@@ -380,10 +384,8 @@ class DanogoClmm {
     // Initialize transaction builder
     let tx: SigningTransactionBuilder = client.newTx();
 
-    // Cardano's withdrawals are keyed by reward account, so two pools sharing
-    // a staking script distinct from the pool script would collide here —
-    // one entry silently overwriting the other while both pools' outputs
-    // still credit themselves the reward, double-counting it.
+    // Withdrawals are keyed by reward account; two pools sharing a staking
+    // script would otherwise collide here and double-count the reward.
     const queuedStakingCredentials = new Set<string>();
 
     // Add reference inputs. Pools sharing a staking script would otherwise be
@@ -476,10 +478,8 @@ class DanogoClmm {
 
       // Handle staking rewards if applicable
       if (stakingCredential) {
-        // A pool delegating to its own spend script shares a reward account with
-        // the withdrawal that invokes the validator above. Withdrawals are keyed
-        // by reward account, so a second entry here would collide with it rather
-        // than add to it, and that one invocation already covers both purposes.
+        // A pool delegating to its own spend script shares a reward account
+        // with the withdrawal above; a second entry would collide, not add.
         const sharesPoolScriptAccount =
           toScriptHashHex(stakingCredential) ===
           toScriptHashHex(poolScriptCredential);
@@ -579,10 +579,8 @@ class DanogoClmm {
     const outputs = tx.outputs ?? [];
 
     outputs.forEach((utxo, index) => {
-      // A validity NFT, once minted, is a freely transferable token — anyone
-      // could send one to an address they control, paired with an arbitrary
-      // datum. Require it to actually sit at the pool script's own address,
-      // matching the check derivePoolNft makes for a live UTxO.
+      // A validity NFT is freely transferable once minted, so also require the
+      // output to sit at the pool script's address — same check as derivePoolNft.
       const credential = getPaymentCredential(utxo.address);
       const isPoolScriptAddress =
         credential?._tag === "ScriptHash" &&
@@ -646,12 +644,7 @@ class DanogoClmm {
     return concentratedPools;
   }
 
-  /**
-   * `poolScriptOutRef` and `poolScriptHash` are two separate constants in
-   * `constants.ts`, kept in sync by hand. This confirms the script the ref
-   * input actually resolves to hashes to the credential every pool address is
-   * checked against, rather than assuming the two were updated together.
-   */
+  /** poolScriptOutRef and poolScriptHash are separate constants kept in sync by hand; this catches them drifting apart. */
   private assertPoolScriptMatches(
     poolScriptUtxo: UTxO.UTxO,
     scriptHash: string,
@@ -668,6 +661,23 @@ class DanogoClmm {
       );
     }
     return credential;
+  }
+
+  /** Same rationale as assertPoolScriptMatches — protocolScriptOutRef/protocolConfigScriptHash are also hand-kept constants. */
+  private assertProtocolConfigMatches(
+    protocolConfigUtxo: UTxO.UTxO,
+    scriptHash: string,
+    outRef: string,
+  ): void {
+    const credential = protocolConfigUtxo.address.paymentCredential;
+    if (
+      credential._tag !== "ScriptHash" ||
+      toScriptHashHex(credential) !== scriptHash
+    ) {
+      throw new Error(
+        `Protocol config ${outRef} is not locked by the expected script ${scriptHash}.`,
+      );
+    }
   }
 
   /** Anyone can park a UTxO with a crafted datum at the pool address, so the validity NFT is what identifies a real pool. */
@@ -743,11 +753,8 @@ class DanogoClmm {
         `currentEpoch must be a non-negative whole number, got ${supplied}.`,
       );
     }
-    // A caller reading the real chain tip may legitimately differ from this
-    // machine's clock by a little, but nothing legitimate is far off. This
-    // epoch gets written into a pool's shared, persistent lastWithdrawEpoch —
-    // an unbounded value could push it far into the future and permanently
-    // block every future staking claim on that pool.
+    // Written into a pool's shared, persistent lastWithdrawEpoch — an
+    // unbounded value could block every future staking claim on that pool.
     const EPOCH_TOLERANCE = 2;
     if (Math.abs(supplied - clockEpoch) > EPOCH_TOLERANCE) {
       throw new Error(
@@ -862,12 +869,7 @@ class DanogoClmm {
     return rewardAmount;
   }
 
-  /**
-   * The first transaction to touch a pool in a new epoch must carry its staking
-   * withdrawal, so this returns the credential to withdraw from, or null when no
-   * claim is due. Taking it from the pool's own address rather than from a
-   * caller-supplied reference keeps it tied to the pool being spent.
-   */
+  /** Credential to withdraw from if a staking claim is due this epoch, else null. Taken from the pool's own address, not a caller-supplied reference. */
   private resolveEpochClaim(
     poolUtxo: UTxO.UTxO,
     datum: PoolDatum,
@@ -902,12 +904,10 @@ class DanogoClmm {
   }
 
   /**
-   * A UTxO's datum is inline only if the transaction that created it chose to
-   * pay the extra bytes; otherwise the ledger stores just a hash, and the
-   * provider hands that back as a `DatumHash` rather than resolving it. Every
-   * real pool and protocol-config UTxO on Danogo mainnet and preprod stores a
-   * hash, not an inline datum, so skipping this resolution step is not an edge
-   * case — it is the reason parsing a live UTxO would fail every time.
+   * A datum is inline only if its creating tx paid the extra bytes;
+   * otherwise the provider hands back a bare `DatumHash` to resolve. Real
+   * Danogo UTxOs observed so far are all inline, but a hash-referenced one
+   * is still legal Cardano, so this handles both rather than assuming.
    */
   private async resolveDatum(
     client: SigningClient,

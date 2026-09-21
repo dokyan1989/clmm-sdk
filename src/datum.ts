@@ -56,13 +56,7 @@ const asNonNegativeInteger = (field: unknown, name: string): bigint => {
 
 const EMPTY_BYTES = new Uint8Array(0);
 
-/**
- * [policyId, assetName] bytes for a token unit. ADA_UNIT ("lovelace") is not
- * itself hex and must be special-cased to the empty AssetClass, rather than
- * relying on Buffer.from('hex') silently truncating it at the first invalid
- * nibble — Node happens to stop right at position 0, but that's an accident
- * of this one hex decoder, not something the encoding should depend on.
- */
+/** [policyId, assetName] bytes for a token unit. ADA_UNIT ("lovelace") isn't hex, so it's special-cased to the empty AssetClass rather than relying on Buffer.from('hex') to truncate it. */
 const encodeAssetClass = (unit: string): [Uint8Array, Uint8Array] => {
   if (unit === ADA_UNIT) return [EMPTY_BYTES, EMPTY_BYTES];
   return [
@@ -105,17 +99,6 @@ export const transformPoolDatum = (datum: PoolDatum): InlineDatum => {
 };
 
 /** @internal */
-export const transformProtocolConfigDatum = (datum: ProtocolConfigDatum): InlineDatum => {
-  const protocolConfigData = Data.constr(0n, [
-    datum.platformFeeRate,
-    datum.swapFee,
-  ]);
-
-  const hex = Data.toCBORHex(protocolConfigData);
-  return new InlineDatum({ data: hex as any });
-};
-
-/** @internal */
 export const tokenIdToTuple = (tokenId: string): [string, string] => {
   if (!tokenId) return ["", ""];
 
@@ -139,9 +122,8 @@ export const tokenIdToTuple = (tokenId: string): [string, string] => {
 
 /**
  * @internal
- * @param datum Either the raw CBOR hex of an Ogmios transaction output's datum,
- * or already-decoded Plutus data — a UTxO's inline datum, or a hash-referenced
- * datum resolved separately (datum hashes carry no data of their own to parse).
+ * @param datum Raw CBOR hex (an Ogmios output's datum) or already-decoded
+ * Plutus data (a UTxO's inline datum, or a hash-referenced one resolved separately).
  */
 export const parseDatum = (datum: string | Data.Data): PoolDatum => {
   let decoded: any;

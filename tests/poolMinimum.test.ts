@@ -16,6 +16,7 @@ import {
   ADA_UNIT,
   POOL_SCRIPT_HASH_MAINNET,
   PROTOCOL_CONFIG_OUT_REF_MAINNET,
+  PROTOCOL_CONFIG_SCRIPT_HASH_MAINNET,
 } from "../src/constants.js";
 import { transformPoolDatum, type PoolDatum } from "../src/datum.js";
 import { getPolicyIdAssetNameFromUnit } from "../src/multiAssets.js";
@@ -74,13 +75,14 @@ const utxoAt = (
   assets: Assets.Assets,
   datumOption?: InlineDatum,
   scriptRef?: PlutusV3.PlutusV3,
+  paymentCredentialHash: string = POOL_SCRIPT_HASH_MAINNET,
 ) =>
   new UTxO.UTxO({
     transactionId: TransactionHash.fromHex(txId),
     index: 0n,
     address: new Address.Address({
       networkId: 1,
-      paymentCredential: ScriptHash.fromHex(POOL_SCRIPT_HASH_MAINNET),
+      paymentCredential: ScriptHash.fromHex(paymentCredentialHash),
     }),
     assets,
     datumOption,
@@ -117,6 +119,8 @@ const client = (): SigningClient =>
             CONFIG_TX,
             Assets.fromLovelace(5_000_000n),
             new InlineDatum({ data: Data.constr(0n, [3_000n, 2_000_000n]) }),
+            undefined,
+            PROTOCOL_CONFIG_SCRIPT_HASH_MAINNET,
           ),
         ];
       }

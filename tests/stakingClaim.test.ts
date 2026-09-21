@@ -13,7 +13,11 @@ import { InlineDatum } from "@evolution-sdk/evolution/InlineDatum";
 import * as PlutusV3 from "@evolution-sdk/evolution/PlutusV3";
 import { fromScript } from "@evolution-sdk/evolution/ScriptHash";
 import DanogoClmm from "../src/sdk.js";
-import { ADA_UNIT, POOL_SCRIPT_HASH_MAINNET } from "../src/constants.js";
+import {
+  ADA_UNIT,
+  POOL_SCRIPT_HASH_MAINNET,
+  PROTOCOL_CONFIG_SCRIPT_HASH_MAINNET,
+} from "../src/constants.js";
 
 // This SDK now verifies the pool-script UTxO's real hash against
 // POOL_SCRIPT_HASH_MAINNET, which no fixture bytes can be made to hash to.
@@ -121,7 +125,7 @@ const configUtxo = (): UTxO.UTxO =>
     index: 0n,
     address: new Address.Address({
       networkId: 1,
-      paymentCredential: ScriptHash.fromHex(POOL_SCRIPT_HASH_MAINNET),
+      paymentCredential: ScriptHash.fromHex(PROTOCOL_CONFIG_SCRIPT_HASH_MAINNET),
     }),
     assets: Assets.fromLovelace(5_000_000n),
     datumOption: new InlineDatum({ data: Data.constr(0n, [3_000n, 2_000_000n]) }),

@@ -36,12 +36,7 @@ export interface SwapRequest {
     /** Reference UTxO for the pool's own staking script; required only if it still owes this epoch's reward claim. */
     stakingOutRef?: string;
   }[];
-  protocolConfigOutRef?: string;
-  /**
-   * Current Cardano epoch. Defaults to one derived from this machine's clock,
-   * which a skewed clock gets wrong near an epoch boundary; pass the epoch read
-   * from the chain if you have it.
-   */
+  /** Current Cardano epoch. Defaults to this machine's clock; pass the chain's own epoch if you have it, to avoid clock skew near a boundary. */
   currentEpoch?: number;
 }
 
@@ -55,7 +50,6 @@ export interface QuoteSwapRequest {
     /** Reference UTxO for the pool's own staking script; required only if it still owes this epoch's reward claim. */
     stakingOutRef?: string;
   }[];
-  protocolConfigOutRef?: string;
   /** See {@link SwapRequest.currentEpoch}. */
   currentEpoch?: number;
 }

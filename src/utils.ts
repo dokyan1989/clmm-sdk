@@ -73,12 +73,9 @@ export function calculateConcentratedPoolSwap(
 
 /**
  * Bonding-curve output with LP fee. When the naive output would meet or
- * exceed the pool's real reserve, caps the output at that reserve and
- * back-computes the (necessarily smaller) input that actually produces it,
- * instead of refusing the trade outright — mirroring the reference
- * implementation's handling of this boundary. The platform fee is charged
- * on the amount actually taken, not the amount originally offered, so a
- * capped swap isn't overcharged.
+ * exceed the pool's real reserve, caps it there and back-computes the
+ * smaller input that actually produces it, instead of refusing the trade.
+ * Platform fee is charged on the amount actually taken, not offered.
  * @internal
  */
 const getPoolChange = (
@@ -92,15 +89,11 @@ const getPoolChange = (
   const BASE = 10_000n;
   const offFee = BASE - lpFeeRate;
 
-  // A pool can have zero (or, for a corrupt datum, negative) real reserve on
-  // the buy side — e.g. an ADA pool whose entire reserve is tied up in the
-  // reserved min-ADA/fee amount excluded from activeReserveX. There is
-  // nothing to cap the trade down to: any swap in this direction can only
-  // produce a degenerate 0-for-0 result the validator itself refuses, so
-  // reject it here instead of building a transaction that can only fail
-  // on-chain. This is distinct from a merely tiny amountIn rounding its own
-  // (uncapped) output down to zero against an otherwise healthy reserve,
-  // which stays a valid, if uneconomical, trade.
+  // Real reserve can be zero (or negative, for a corrupt datum) — e.g. an ADA
+  // pool whose reserve is entirely tied up in the excluded min-ADA/fee
+  // amount. Nothing to cap down to, so reject rather than build a tx that
+  // can only fail on-chain. Distinct from a merely tiny amountIn rounding an
+  // otherwise-healthy (uncapped) output down to zero, which stays valid.
   if (tokenOutReal <= 0n) {
     throw new Error("pool out exceeded");
   }

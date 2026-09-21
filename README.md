@@ -106,12 +106,11 @@ const txHash = await danogoClmm.submitSwap(evolutionClient, {
       minOutChangeAmount: 4_500_000n, // retrieve from calculateSwapOut to avoid slippage
       stakingOutRef: "tx_hash#index" // required if pool contains ADA and swap for the first time in current epoch
     }
-  ],
-  protocolConfigOutRef: "tx_hash#index"
+  ]
 });
 ```
 
-> `protocolConfigOutRef` is optional and defaults to the SDK's internal constants. In rare cases where the protocol configuration has updated but the SDK has not yet been updated, you can manually provide the latest `protocolConfigOutRef` in your request. Refer to `src/constants.ts` for the constants.
+> The protocol config UTxO is always the SDK's internal constant (`src/constants.ts`) — there is no request field to override it. It's read-only reference data the SDK itself resolves and verifies against a known script address; a request field here would only be a way to point it at something else, with no legitimate reason to.
 
 > `currentEpoch` is also optional on both `calculateSwapOut` and `submitSwap` requests. It defaults to the epoch derived from this machine's clock, which is wrong right around an epoch boundary if your clock is skewed — pass the epoch read from the chain if you have it (this is what decides whether a pool's `stakingOutRef` is required, per above).
 

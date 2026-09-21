@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Address, AssetName, Assets, ScriptHash } from "@evolution-sdk/evolution";
 import * as TxOut from "@evolution-sdk/evolution/TxOut";
-import DanogoClmm from "../src/sdk.js";
+import { assertPoolOutputsAt } from "../src/assertions.js";
 import { POOL_SCRIPT_HASH_MAINNET } from "../src/constants.js";
 import { getPolicyIdAssetNameFromUnit } from "../src/multiAssets.js";
 
@@ -42,17 +42,7 @@ const verify = (
   outputs: TxOut.TransactionOutput[],
   pools: { validityNft: AssetName.AssetName; outRef: string }[],
   indices: number[],
-) =>
-  (
-    new DanogoClmm() as unknown as {
-      assertPoolOutputsAt: (
-        outputs: TxOut.TransactionOutput[],
-        pools: { validityNft: AssetName.AssetName; outRef: string }[],
-        indices: number[],
-        scriptHash: string,
-      ) => void;
-    }
-  ).assertPoolOutputsAt(outputs, pools, indices, POOL_SCRIPT_HASH_MAINNET);
+) => assertPoolOutputsAt(outputs, pools, indices, POOL_SCRIPT_HASH_MAINNET);
 
 describe("pool output index in the built transaction", () => {
   it("passes when each pool's NFT sits where its redeemer says", () => {

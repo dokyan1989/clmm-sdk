@@ -1,6 +1,6 @@
 import { NetworkId, TransactionHash, TransactionInput, UTxO } from "@evolution-sdk/evolution";
-import { PoolDatum } from "./datum.js";
 import { ADA_UNIT, EPOCH_LENGTH_MAINNET, EPOCH_LENGTH_PREPROD } from "./constants.js";
+import { PoolDatum } from "./datum.js";
 
 /** @internal */
 export const getEpoch = (t: number, network: NetworkId.NetworkId): number => {

@@ -8,11 +8,10 @@ import {
   TransactionHash,
   UTxO,
 } from "@evolution-sdk/evolution";
-import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
 import { InlineDatum } from "@evolution-sdk/evolution/InlineDatum";
 import * as PlutusV3 from "@evolution-sdk/evolution/PlutusV3";
 import { fromScript } from "@evolution-sdk/evolution/ScriptHash";
-import DanogoClmm from "../src/sdk.js";
+import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
 import {
   ADA_UNIT,
   POOL_SCRIPT_HASH_MAINNET,
@@ -38,8 +37,9 @@ vi.mock("@evolution-sdk/evolution/ScriptHash", async (importOriginal) => {
   };
 });
 import { transformPoolDatum, type PoolDatum } from "../src/datum.js";
-import { getEpoch } from "../src/utils.js";
 import { getPolicyIdAssetNameFromUnit } from "../src/multiAssets.js";
+import DanogoClmm from "../src/sdk.js";
+import { getEpoch } from "../src/utils.js";
 
 const POOL_OUT_REF = `${"a".repeat(64)}#0`;
 const STAKING_OUT_REF = `${"b".repeat(64)}#0`;

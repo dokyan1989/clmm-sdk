@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { UTxO } from "@evolution-sdk/evolution";
 import * as PlutusV3 from "@evolution-sdk/evolution/PlutusV3";
 import { fromScript, toHex as toScriptHashHex } from "@evolution-sdk/evolution/ScriptHash";
-import DanogoClmm from "../src/sdk.js";
+import { assertPoolScriptMatches } from "../src/assertions.js";
 
 const OUT_REF = `${"a".repeat(64)}#0`;
 
@@ -17,15 +17,7 @@ const utxoWithScript = (scriptRef?: PlutusV3.PlutusV3): UTxO.UTxO =>
   ({ scriptRef }) as unknown as UTxO.UTxO;
 
 const check = (utxo: UTxO.UTxO, expectedHash: string) =>
-  (
-    new DanogoClmm() as unknown as {
-      assertPoolScriptMatches: (
-        utxo: UTxO.UTxO,
-        scriptHash: string,
-        outRef: string,
-      ) => unknown;
-    }
-  ).assertPoolScriptMatches(utxo, expectedHash, OUT_REF);
+  assertPoolScriptMatches(utxo, expectedHash, OUT_REF);
 
 describe("pool script reference vs. configured pool script hash", () => {
   it("passes when the referenced script hashes to the configured constant", () => {

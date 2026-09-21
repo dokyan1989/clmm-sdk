@@ -1,3 +1,4 @@
+import { Transaction } from "@cardano-ogmios/schema";
 import {
   AssetName,
   Data,
@@ -7,16 +8,7 @@ import {
   RewardAddress,
   UTxO,
 } from "@evolution-sdk/evolution";
-import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
-import * as TxOut from "@evolution-sdk/evolution/TxOut";
-import { SigningTransactionBuilder } from "@evolution-sdk/evolution/sdk/builders/TransactionBuilder";
-import * as ScriptHash from "@evolution-sdk/evolution/ScriptHash";
 import { getPaymentCredential } from "@evolution-sdk/evolution/Address";
-import { toHex as toCredentialHex } from "@evolution-sdk/evolution/Credential";
-import {
-  fromScript,
-  toHex as toScriptHashHex,
-} from "@evolution-sdk/evolution/ScriptHash";
 import {
   fromAsset,
   flatten,
@@ -25,8 +17,27 @@ import {
   fromLovelace,
   subtractLovelace,
 } from "@evolution-sdk/evolution/Assets";
-import { Transaction } from "@cardano-ogmios/schema";
-import { swapTokensRedeemer } from "./redeemer.js";
+import { toHex } from "@evolution-sdk/evolution/Bytes32";
+import { toHex as toCredentialHex } from "@evolution-sdk/evolution/Credential";
+import * as ScriptHash from "@evolution-sdk/evolution/ScriptHash";
+import { toHex as toScriptHashHex } from "@evolution-sdk/evolution/ScriptHash";
+import { SigningTransactionBuilder } from "@evolution-sdk/evolution/sdk/builders/TransactionBuilder";
+import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
+import {
+  assertMeetsPoolMinimum,
+  assertNonZeroDeltas,
+  assertPoolOutputsAt,
+  assertPoolScriptMatches,
+  assertProtocolConfigMatches,
+  assertSlippageFloors,
+  assertStakingRefMatches,
+} from "./assertions.js";
+import {
+  ConcentratedPool,
+  QuoteSwapRequest,
+  SwapRequest,
+} from "./concentratedPool.js";
+import { ADA_UNIT, getNetworkConfig } from "./constants.js";
 import {
   PoolDatum,
   parseDatum,
@@ -39,11 +50,7 @@ import {
   getPolicyIdAssetNameFromUnit,
   MultiAsset,
 } from "./multiAssets.js";
-import {
-  ConcentratedPool,
-  QuoteSwapRequest,
-  SwapRequest,
-} from "./concentratedPool.js";
+import { swapTokensRedeemer } from "./redeemer.js";
 import {
   calculateMultiPoolSwap,
   getEpoch,
@@ -51,8 +58,6 @@ import {
   outRefKey,
   toEvoOutRef,
 } from "./utils.js";
-import { ADA_UNIT, getNetworkConfig } from "./constants.js";
-import { toHex } from "@evolution-sdk/evolution/Bytes32";
 
 class DanogoClmm {
   constructor() { }
@@ -94,7 +99,7 @@ class DanogoClmm {
     if (!client || !client.address) {
       throw new Error("Please connect a wallet first.");
     }
-    this.assertNonZeroDeltas(request.pools);
+    assertNonZeroDeltas(request.pools);
     const networkId = (await client.address()).networkId;
     const currentEpoch = this.resolveEpoch(request.currentEpoch, networkId);
 
@@ -118,7 +123,7 @@ class DanogoClmm {
 
     // Fetch protocol config
     const protocolConfigUtxo = await this.getUtxoOrThrow(client, protocolConfigOutRef, "Protocol config");
-    this.assertProtocolConfigMatches(
+    assertProtocolConfigMatches(
       protocolConfigUtxo,
       config.protocolConfigScriptHash,
       protocolConfigOutRef,
@@ -134,7 +139,7 @@ class DanogoClmm {
         const poolDatum: PoolDatum = parseDatum(
           await this.resolveDatum(client, poolUtxo, `Pool input UTxO ${index}`),
         );
-        this.assertMeetsPoolMinimum(
+        assertMeetsPoolMinimum(
           poolDatum,
           pool.deltaAmount,
           pool.poolOutRef,
@@ -236,8 +241,8 @@ class DanogoClmm {
     if (!client || !client.address) {
       throw new Error("Please connect a wallet first.");
     }
-    this.assertNonZeroDeltas(request.pools);
-    this.assertSlippageFloors(request.pools);
+    assertNonZeroDeltas(request.pools);
+    assertSlippageFloors(request.pools);
     const networkId = (await client.address()).networkId;
     const currentEpoch = this.resolveEpoch(request.currentEpoch, networkId);
 
@@ -261,7 +266,7 @@ class DanogoClmm {
     const protocolConfigOutRef = config.protocolScriptOutRef;
 
     const poolScriptUtxo = await this.getUtxoOrThrow(client, poolScriptOutRef, "Pool script");
-    const poolScriptCredential = this.assertPoolScriptMatches(
+    const poolScriptCredential = assertPoolScriptMatches(
       poolScriptUtxo,
       config.poolScriptHash,
       poolScriptOutRef,
@@ -269,7 +274,7 @@ class DanogoClmm {
 
     // Fetch protocol config
     const protocolConfigUtxo = await this.getUtxoOrThrow(client, protocolConfigOutRef, "Protocol config");
-    this.assertProtocolConfigMatches(
+    assertProtocolConfigMatches(
       protocolConfigUtxo,
       config.protocolConfigScriptHash,
       protocolConfigOutRef,
@@ -291,7 +296,7 @@ class DanogoClmm {
       const poolDatum: PoolDatum = parseDatum(
         await this.resolveDatum(client, poolUtxo, `Pool input UTxO ${i}`),
       );
-      this.assertMeetsPoolMinimum(poolDatum, pool.deltaAmount, pool.poolOutRef);
+      assertMeetsPoolMinimum(poolDatum, pool.deltaAmount, pool.poolOutRef);
       const tokenA = getPolicyIdAssetNameFromUnit(poolDatum.tokenX);
       const tokenB = getPolicyIdAssetNameFromUnit(poolDatum.tokenY);
       const coin = poolUtxo.assets.lovelace;
@@ -317,7 +322,7 @@ class DanogoClmm {
             `Pool ${pool.poolOutRef} has not claimed its staking rewards this epoch, so the swap must withdraw them. Provide its stakingOutRef.`,
           );
         }
-        this.assertStakingRefMatches(
+        assertStakingRefMatches(
           stakingRefUtxo,
           stakingCredential,
           pool.poolOutRef,
@@ -484,33 +489,36 @@ class DanogoClmm {
           toScriptHashHex(stakingCredential) ===
           toScriptHashHex(poolScriptCredential);
 
-        if (!sharesPoolScriptAccount) {
-          const stakingHex = toScriptHashHex(stakingCredential);
-          if (queuedStakingCredentials.has(stakingHex)) {
+        if (sharesPoolScriptAccount) {
+          // The shared entry withdraws 0, and Cardano has no partial
+          // withdrawal, so a nonzero reward can't be collected through it.
+          if (rewardAmount > 0n) {
             throw new Error(
-              `Pool ${pool.outRef} shares its staking credential with another pool in this swap; withdrawing the same reward account twice would double-count its ${rewardAmount} lovelace reward.`,
+              `Pool ${pool.outRef} delegates to its own spend script and has ${rewardAmount} lovelace of rewards, which this swap cannot withdraw.`,
             );
           }
-          queuedStakingCredentials.add(stakingHex);
+          continue;
+        }
 
-          tx = tx.withdraw({
-            stakeCredential: stakingCredential,
-            amount: rewardAmount,
-            redeemer: swapTokensRedeemer(
-              pool.utxo,
-              poolUtxos,
-              redeemerDeltaAmounts,
-              poolOutputIndices,
-              protocolConfigIdx,
-            ),
-          });
-        } else if (rewardAmount > 0n) {
-          // The shared entry withdraws 0, and Cardano has no partial withdrawal,
-          // so the reward cannot be collected through it.
+        const stakingHex = toScriptHashHex(stakingCredential);
+        if (queuedStakingCredentials.has(stakingHex)) {
           throw new Error(
-            `Pool ${pool.outRef} delegates to its own spend script and has ${rewardAmount} lovelace of rewards, which this swap cannot withdraw.`,
+            `Pool ${pool.outRef} shares its staking credential with another pool in this swap; withdrawing the same reward account twice would double-count its ${rewardAmount} lovelace reward.`,
           );
         }
+        queuedStakingCredentials.add(stakingHex);
+
+        tx = tx.withdraw({
+          stakeCredential: stakingCredential,
+          amount: rewardAmount,
+          redeemer: swapTokensRedeemer(
+            pool.utxo,
+            poolUtxos,
+            redeemerDeltaAmounts,
+            poolOutputIndices,
+            protocolConfigIdx,
+          ),
+        });
       }
     }
 
@@ -529,7 +537,7 @@ class DanogoClmm {
       scriptDataFormat: "array",
     });
     const body = (await builtTx.toTransaction()).body;
-    this.assertPoolOutputsAt(
+    assertPoolOutputsAt(
       body.outputs,
       poolsData,
       poolOutputIndices,
@@ -589,95 +597,58 @@ class DanogoClmm {
 
       const val = utxo.value;
       const policyAssets = val[scriptHash];
+      if (!policyAssets || !utxo.datum) return;
 
-      if (policyAssets && utxo.datum) {
-        for (const [assetName, quantity] of Object.entries(policyAssets)) {
-          if (quantity === 1n) {
-            const poolNft = scriptHash + assetName;
-            const outRef = `${tx.id}#${index}`;
-            const coin = val.ada.lovelace;
-            const multiAssets: MultiAsset[] = buildMultiAssetsFromAssets(val);
-            const datum: PoolDatum = parseDatum(utxo.datum);
+      for (const [assetName, quantity] of Object.entries(policyAssets)) {
+        if (quantity !== 1n) continue;
 
-            const tokenA = datum.tokenX;
-            const tokenB = datum.tokenY;
+        const poolNft = scriptHash + assetName;
+        const outRef = `${tx.id}#${index}`;
+        const coin = val.ada.lovelace;
+        const multiAssets: MultiAsset[] = buildMultiAssetsFromAssets(val);
+        const datum: PoolDatum = parseDatum(utxo.datum);
 
-            const getTokenReserve = (tokenId: string) => {
-              if (tokenId === ADA_UNIT) return coin;
-              const [policyId, assetName] = tokenIdToTuple(tokenId);
-              const policyGroup = multiAssets.find(
-                (ma) => ma.policyId === policyId,
-              );
-              const asset = policyGroup?.assets.find(
-                (a) => a.name === assetName,
-              );
-              return asset ? asset.value : 0n;
-            };
+        const tokenA = datum.tokenX;
+        const tokenB = datum.tokenY;
 
-            concentratedPools.push({
-              outRef,
-              address: utxo.address,
-              coin,
-              multiAssets,
-              validityNft: poolNft,
-              tokenA,
-              tokenAReserve: getTokenReserve(tokenA),
-              tokenB,
-              tokenBReserve: getTokenReserve(tokenB),
-              lpFeeRate: datum.lpFeeRate,
-              priceLowerNum: datum.sqrtLowerPriceNum,
-              priceLowerDen: datum.sqrtLowerPriceDen,
-              priceUpperNum: datum.sqrtUpperPriceNum,
-              priceUpperDen: datum.sqrtUpperPriceDen,
-              platformFeeA: datum.platformFeeX,
-              platformFeeB: datum.platformFeeY,
-              minAChange: datum.minXChange,
-              minBChange: datum.minYChange,
-              lpTokenTotalSupply: datum.circulatingLPToken,
-              lastWithdrawEpoch: datum.lastWithdrawEpoch,
-              totalSwapFee: datum.totalSwapFee,
-            });
-          }
-        }
+        const getTokenReserve = (tokenId: string) => {
+          if (tokenId === ADA_UNIT) return coin;
+          const [policyId, assetName] = tokenIdToTuple(tokenId);
+          const policyGroup = multiAssets.find(
+            (ma) => ma.policyId === policyId,
+          );
+          const asset = policyGroup?.assets.find(
+            (a) => a.name === assetName,
+          );
+          return asset ? asset.value : 0n;
+        };
+
+        concentratedPools.push({
+          outRef,
+          address: utxo.address,
+          coin,
+          multiAssets,
+          validityNft: poolNft,
+          tokenA,
+          tokenAReserve: getTokenReserve(tokenA),
+          tokenB,
+          tokenBReserve: getTokenReserve(tokenB),
+          lpFeeRate: datum.lpFeeRate,
+          priceLowerNum: datum.sqrtLowerPriceNum,
+          priceLowerDen: datum.sqrtLowerPriceDen,
+          priceUpperNum: datum.sqrtUpperPriceNum,
+          priceUpperDen: datum.sqrtUpperPriceDen,
+          platformFeeA: datum.platformFeeX,
+          platformFeeB: datum.platformFeeY,
+          minAChange: datum.minXChange,
+          minBChange: datum.minYChange,
+          lpTokenTotalSupply: datum.circulatingLPToken,
+          lastWithdrawEpoch: datum.lastWithdrawEpoch,
+          totalSwapFee: datum.totalSwapFee,
+        });
       }
     });
     return concentratedPools;
-  }
-
-  /** poolScriptOutRef and poolScriptHash are separate constants kept in sync by hand; this catches them drifting apart. */
-  private assertPoolScriptMatches(
-    poolScriptUtxo: UTxO.UTxO,
-    scriptHash: string,
-    outRef: string,
-  ): ScriptHash.ScriptHash {
-    if (!poolScriptUtxo.scriptRef) {
-      throw new Error(`Pool script reference ${outRef} carries no script.`);
-    }
-    const credential = fromScript(poolScriptUtxo.scriptRef);
-    const resolvedHash = toScriptHashHex(credential);
-    if (resolvedHash !== scriptHash) {
-      throw new Error(
-        `Pool script reference ${outRef} resolves to ${resolvedHash}, but the configured pool script hash is ${scriptHash}.`,
-      );
-    }
-    return credential;
-  }
-
-  /** Same rationale as assertPoolScriptMatches — protocolScriptOutRef/protocolConfigScriptHash are also hand-kept constants. */
-  private assertProtocolConfigMatches(
-    protocolConfigUtxo: UTxO.UTxO,
-    scriptHash: string,
-    outRef: string,
-  ): void {
-    const credential = protocolConfigUtxo.address.paymentCredential;
-    if (
-      credential._tag !== "ScriptHash" ||
-      toScriptHashHex(credential) !== scriptHash
-    ) {
-      throw new Error(
-        `Protocol config ${outRef} is not locked by the expected script ${scriptHash}.`,
-      );
-    }
   }
 
   /** Anyone can park a UTxO with a crafted datum at the pool address, so the validity NFT is what identifies a real pool. */
@@ -709,36 +680,6 @@ class DanogoClmm {
   }
 
   /**
-   * The redeemer tells the validator which output re-creates each pool, and that
-   * index is decided before the transaction is assembled. This re-reads the built
-   * transaction to confirm each pool's validity NFT really did land where its
-   * redeemer says, rather than trusting the ordering to hold.
-   */
-  private assertPoolOutputsAt(
-    outputs: readonly TxOut.TransactionOutput[],
-    pools: { validityNft: AssetName.AssetName; outRef: string }[],
-    outputIndices: number[],
-    scriptHash: string,
-  ): void {
-    const policyId = PolicyId.fromHex(scriptHash);
-
-    pools.forEach((pool, index) => {
-      const outputIndex = outputIndices[index];
-      if (outputIndex < 0) return;
-
-      const output = outputs[outputIndex];
-      const held = output
-        ? quantityOf(output.assets, policyId, pool.validityNft)
-        : 0n;
-      if (held !== 1n) {
-        throw new Error(
-          `Pool ${pool.outRef} is declared at output ${outputIndex} of the built transaction, but that output does not hold its validity NFT.`,
-        );
-      }
-    });
-  }
-
-  /**
    * The epoch decides what this swap writes into the pool datum and whether it
    * owes a staking claim, but no provider method reports the chain tip, so the
    * fallback is this machine's clock. A caller that can read the tip should say
@@ -762,52 +703,6 @@ class DanogoClmm {
       );
     }
     return supplied;
-  }
-
-  /** Below its minimum the validator moves the pool by that minimum instead, taking more from the wallet than the caller offered. */
-  private assertMeetsPoolMinimum(
-    datum: PoolDatum,
-    deltaAmount: bigint,
-    outRef: string,
-  ): void {
-    const offered = deltaAmount > 0n ? deltaAmount : -deltaAmount;
-    const minimum = deltaAmount > 0n ? datum.minXChange : datum.minYChange;
-    if (offered < minimum) {
-      throw new Error(
-        `Pool ${outRef} moves at least ${minimum} at a time, but the request offers ${offered}.`,
-      );
-    }
-  }
-
-  /** An omitted floor leaves the swap with no price protection at all, which is an oversight rather than a choice; `0n` says it on purpose. */
-  private assertSlippageFloors(
-    pools: readonly { poolOutRef: string; minOutChangeAmount?: bigint }[],
-  ): void {
-    pools.forEach((pool, index) => {
-      if (pool.minOutChangeAmount === undefined) {
-        throw new Error(
-          `Pool ${index} (${pool.poolOutRef}) has no minOutChangeAmount. Set the least output you accept, or 0n to swap at any price.`,
-        );
-      }
-      if (pool.minOutChangeAmount < 0n) {
-        throw new Error(
-          `Pool ${index} (${pool.poolOutRef}) has a negative minOutChangeAmount.`,
-        );
-      }
-    });
-  }
-
-  /** A zero-delta pool is dropped from the swap results, desyncing the pool indices the redeemer is built from. */
-  private assertNonZeroDeltas(
-    pools: readonly { poolOutRef: string; deltaAmount: bigint }[],
-  ): void {
-    pools.forEach((pool, index) => {
-      if (pool.deltaAmount === 0n) {
-        throw new Error(
-          `Pool ${index} (${pool.poolOutRef}) has deltaAmount 0. Remove it from the request instead.`,
-        );
-      }
-    });
   }
 
   /** Asset delta for the pool's new output: +amountIn (plus swapFee) of tokenIn, -amountOut of tokenOut. */
@@ -882,25 +777,6 @@ class DanogoClmm {
       return null;
     }
     return stakingCredential;
-  }
-
-  private assertStakingRefMatches(
-    stakingRefUtxo: UTxO.UTxO,
-    stakingCredential: ScriptHash.ScriptHash,
-    outRef: string,
-  ): void {
-    if (!stakingRefUtxo.scriptRef) {
-      throw new Error(
-        `Staking reference for pool ${outRef} carries no script.`,
-      );
-    }
-    const referenced = toScriptHashHex(fromScript(stakingRefUtxo.scriptRef));
-    const expected = toScriptHashHex(stakingCredential);
-    if (referenced !== expected) {
-      throw new Error(
-        `Staking reference for pool ${outRef} holds script ${referenced}, but the pool delegates to ${expected}.`,
-      );
-    }
   }
 
   /**

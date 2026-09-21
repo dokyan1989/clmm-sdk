@@ -8,10 +8,9 @@ import {
   TransactionInput,
   UTxO,
 } from "@evolution-sdk/evolution";
-import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
 import { InlineDatum } from "@evolution-sdk/evolution/InlineDatum";
 import * as PlutusV3 from "@evolution-sdk/evolution/PlutusV3";
-import DanogoClmm from "../src/sdk.js";
+import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
 import {
   ADA_UNIT,
   POOL_SCRIPT_HASH_MAINNET,
@@ -20,6 +19,7 @@ import {
 } from "../src/constants.js";
 import { transformPoolDatum, type PoolDatum } from "../src/datum.js";
 import { getPolicyIdAssetNameFromUnit } from "../src/multiAssets.js";
+import DanogoClmm from "../src/sdk.js";
 
 // The fixture's pool-script UTxO carries a stand-in script — this SDK verifies
 // that script's real hash against POOL_SCRIPT_HASH_MAINNET, which no fixture

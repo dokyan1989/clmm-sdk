@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { KeyHash, ScriptHash, UTxO } from "@evolution-sdk/evolution";
-import DanogoClmm from "../src/sdk.js";
+import { assertProtocolConfigMatches } from "../src/assertions.js";
 
 const OUT_REF = `${"a".repeat(64)}#0`;
 const SCRIPT_HASH = "26ec271e96420bd548932f350e76ea38590da68e12f0f55bd5473f67";
@@ -11,15 +11,7 @@ const utxoAt = (
 ): UTxO.UTxO => ({ address: { paymentCredential } }) as unknown as UTxO.UTxO;
 
 const check = (utxo: UTxO.UTxO, expectedHash: string) =>
-  (
-    new DanogoClmm() as unknown as {
-      assertProtocolConfigMatches: (
-        utxo: UTxO.UTxO,
-        scriptHash: string,
-        outRef: string,
-      ) => void;
-    }
-  ).assertProtocolConfigMatches(utxo, expectedHash, OUT_REF);
+  assertProtocolConfigMatches(utxo, expectedHash, OUT_REF);
 
 describe("protocol config UTxO vs. configured protocol config script hash", () => {
   it("passes when the UTxO sits at the configured script address", () => {

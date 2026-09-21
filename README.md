@@ -146,6 +146,8 @@ async function main() {
         for (const tx of block.transactions!) {
           const networkId = 0; // 0 for Preprod, 1 for Mainnet
           const pools = danogoClmm.getPoolsFromOgmiosTx(tx, networkId);
+          // A third, optional `poolScriptHash` argument overrides the
+          // network's default pool script hash, if you ever need that.
           // your logic with pools
         }
       }

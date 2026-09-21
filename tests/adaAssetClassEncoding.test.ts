@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { transformPoolDatum, parseDatum, type PoolDatum } from "../src/datum.js";
 import { ADA_UNIT } from "../src/constants.js";
+import { transformPoolDatum, parseDatum, type PoolDatum } from "../src/datum.js";
 
 const TOKEN_Y =
   "fe7c786ab321f41c654ef6c1af7b3250a613c24e4213e0425a7ae456.55534441";

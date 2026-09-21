@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { calculateConcentratedPoolSwap } from "../src/utils.js";
 import { ADA_UNIT } from "../src/constants.js";
 import type { PoolDatum } from "../src/datum.js";
+import { calculateConcentratedPoolSwap } from "../src/utils.js";
 
 const datum: PoolDatum = {
   tokenX: ADA_UNIT,

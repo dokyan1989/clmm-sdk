@@ -8,11 +8,10 @@ import {
   TransactionInput,
   UTxO,
 } from "@evolution-sdk/evolution";
-import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
 import { InlineDatum } from "@evolution-sdk/evolution/InlineDatum";
 import * as PlutusV3 from "@evolution-sdk/evolution/PlutusV3";
 import { fromScript } from "@evolution-sdk/evolution/ScriptHash";
-import DanogoClmm from "../src/sdk.js";
+import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
 import {
   ADA_UNIT,
   POOL_SCRIPT_HASH_MAINNET,
@@ -20,6 +19,7 @@ import {
   PROTOCOL_CONFIG_OUT_REF_MAINNET,
   PROTOCOL_CONFIG_SCRIPT_HASH_MAINNET,
 } from "../src/constants.js";
+import DanogoClmm from "../src/sdk.js";
 
 // This SDK now verifies the pool-script UTxO's real hash against
 // POOL_SCRIPT_HASH_MAINNET, which no fixture bytes can be made to hash to.
@@ -40,8 +40,8 @@ vi.mock("@evolution-sdk/evolution/ScriptHash", async (importOriginal) => {
   };
 });
 import { parseDatum, transformPoolDatum, type PoolDatum } from "../src/datum.js";
-import { getEpoch } from "../src/utils.js";
 import { getPolicyIdAssetNameFromUnit } from "../src/multiAssets.js";
+import { getEpoch } from "../src/utils.js";
 
 const POOL_TX = "a".repeat(64);
 const POOL_OUT_REF = `${POOL_TX}#0`;

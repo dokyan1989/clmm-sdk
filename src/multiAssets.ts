@@ -1,6 +1,6 @@
 import { Value } from "@cardano-ogmios/schema";
 import { AssetName, Bytes, PolicyId } from "@evolution-sdk/evolution";
-import { ADA_UNIT } from "./constants";
+import { ADA_UNIT } from "./constants.js";
 
 export interface MultiAsset {
   policyId: string;

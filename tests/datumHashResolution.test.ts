@@ -9,9 +9,8 @@ import {
   TransactionInput,
   UTxO,
 } from "@evolution-sdk/evolution";
-import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
 import { InlineDatum } from "@evolution-sdk/evolution/InlineDatum";
-import DanogoClmm from "../src/sdk.js";
+import type { SigningClient } from "@evolution-sdk/evolution/sdk/client/Client";
 import {
   ADA_UNIT,
   POOL_SCRIPT_HASH_MAINNET,
@@ -20,6 +19,7 @@ import {
 } from "../src/constants.js";
 import { transformPoolDatum, type PoolDatum } from "../src/datum.js";
 import { getPolicyIdAssetNameFromUnit } from "../src/multiAssets.js";
+import DanogoClmm from "../src/sdk.js";
 
 const POOL_TX = "a".repeat(64);
 const POOL_OUT_REF = `${POOL_TX}#0`;

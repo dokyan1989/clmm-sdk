@@ -159,9 +159,28 @@ class DanogoClmm {
           tokenBAmount: getTokenAmount(tokenB),
           datum: poolDatum,
           rewardAmount,
+          stakingCredential,
         };
       })
     );
+
+    // Two pools sharing a staking script (distinct from the pool script)
+    // would each quote the same reward account's balance as if it were
+    // theirs alone; only one of them could actually claim it in a real
+    // submitSwap for this same batch, which refuses outright when this
+    // happens (see the withdrawal-building loop there).
+    const queuedStakingCredentials = new Set<string>();
+    poolsData.forEach((pool, index) => {
+      if (!pool.stakingCredential) return;
+      const stakingHex = toScriptHashHex(pool.stakingCredential);
+      if (stakingHex === config.poolScriptHash) return;
+      if (queuedStakingCredentials.has(stakingHex)) {
+        throw new Error(
+          `Pool ${request.pools[index].poolOutRef} shares its staking credential with another pool in this swap; only one of them could actually claim the reward.`,
+        );
+      }
+      queuedStakingCredentials.add(stakingHex);
+    });
 
     // Calculate multi-pool swap
     const deltaAmounts = request.pools.map((pool) => pool.deltaAmount);

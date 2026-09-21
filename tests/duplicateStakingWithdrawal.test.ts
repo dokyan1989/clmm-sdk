@@ -189,4 +189,26 @@ describe("two pools sharing one staking script in the same swap", () => {
       /shares its staking credential with another pool in this swap/,
     );
   });
+
+  it("calculateSwapOut also refuses, instead of quoting each pool the same reward twice", async () => {
+    const client = {
+      address: async () => ({ networkId: 1 }),
+      getDelegation: async () => ({ rewards: 1_500_000n }),
+      getUtxosByOutRef: async (refs: TransactionInput.TransactionInput[]) => {
+        const txId = TransactionHash.toHex(refs[0].transactionId);
+        if (txId === POOL_TX_A) return [poolUtxo(POOL_TX_A, "aabbccdd")];
+        if (txId === POOL_TX_B) return [poolUtxo(POOL_TX_B, "eeff0011")];
+        return [configUtxo()];
+      },
+    } as unknown as SigningClient;
+
+    await expect(
+      new DanogoClmm().calculateSwapOut(client, {
+        pools: [
+          { poolOutRef: POOL_OUT_REF_A, deltaAmount: 500_000n },
+          { poolOutRef: POOL_OUT_REF_B, deltaAmount: 500_000n },
+        ],
+      }),
+    ).rejects.toThrow(/shares its staking credential with another pool/);
+  });
 });
